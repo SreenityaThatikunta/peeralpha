@@ -75,7 +75,7 @@ def build_summary(runs: List[Dict]) -> str:
     for r in sorted(runs, key=lambda r: (r["tag"] == "legacy", r["tag"], r["method"], r["seed"])):
         by_tag.setdefault(r["tag"], []).append(r)
 
-    L = ["# GraphAlpha-RL — experiment summary", "",
+    L = ["# PeerAlpha — experiment summary", "",
          "Test metrics use the pool snapshot with the best *validation* IC. `±` = std over seeds.", "",
          "## Experiments", ""]
     idx = []

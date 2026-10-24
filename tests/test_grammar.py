@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 
-from graphalpha.expr import evaluate
-from graphalpha.grammar import FormulaBuilder, build_from_keys
-from graphalpha.vocab import Vocab
+from peeralpha.expr import evaluate
+from peeralpha.grammar import FormulaBuilder, build_from_keys
+from peeralpha.vocab import Vocab
 
 
 def _rollout(vocab, rng, max_len, allow_graph):

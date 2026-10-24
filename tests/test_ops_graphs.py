@@ -2,11 +2,11 @@ import numpy as np
 import pytest
 import torch
 
-from graphalpha import ops
-from graphalpha.expr import evaluate
-from graphalpha.grammar import build_from_keys
-from graphalpha.graphs import build_dynamic_graph
-from graphalpha.vocab import Vocab
+from peeralpha import ops
+from peeralpha.expr import evaluate
+from peeralpha.grammar import build_from_keys
+from peeralpha.graphs import build_dynamic_graph
+from peeralpha.vocab import Vocab
 
 
 @pytest.mark.parametrize("name,w", [("Mean", 5), ("Std", 10), ("Max", 5), ("Min", 5), ("Delta", 5),
@@ -61,7 +61,7 @@ def test_graph_operators_shapes_and_semantics(small_market):
 
 
 def test_nbr_mean_manual_check():
-    from graphalpha.graphs import NeighborGraph
+    from peeralpha.graphs import NeighborGraph
     idx = torch.tensor([[[1, 2], [0, 2], [0, 1]]])             # fully connected triangle, k=2
     mask = torch.ones(1, 3, 2, dtype=torch.bool)
     g = NeighborGraph("t", idx, mask, torch.zeros(4, dtype=torch.long))
@@ -96,7 +96,7 @@ def test_graph_alpha_is_causal(small_market):
 
 
 def test_derived_features_are_returns(small_market):
-    from graphalpha.ops import FEATURES
+    from peeralpha.ops import FEATURES
     close = small_market.feat[FEATURES.index("close")]
     ret = small_market.feat[FEATURES.index("ret")]
     ret5 = small_market.feat[FEATURES.index("ret5")]
@@ -123,8 +123,8 @@ def test_gop_zscore_removes_price_scale(small_market):
 
 
 def test_small_sectors_are_merged(tmp_path):
-    from graphalpha.market import Market
-    from graphalpha.synthetic import make_synthetic
+    from peeralpha.market import Market
+    from peeralpha.synthetic import make_synthetic
     path = str(tmp_path / "syn.npz")
     d = make_synthetic(path, n_stocks=40, start="2011-01-03", end="2014-12-31", n_sectors=5, seed=3)
     d["sector_ids"] = d["sector_ids"].copy()

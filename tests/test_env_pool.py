@@ -1,10 +1,10 @@
 import numpy as np
 import torch
 
-from graphalpha.env import AlphaEnv
-from graphalpha.metrics import daily_ic, daily_rank_ic, zscore_rows
-from graphalpha.pool import AlphaPool
-from graphalpha.vocab import Vocab
+from peeralpha.env import AlphaEnv
+from peeralpha.metrics import daily_ic, daily_rank_ic, zscore_rows
+from peeralpha.pool import AlphaPool
+from peeralpha.vocab import Vocab
 
 
 def test_daily_ic_matches_numpy():
@@ -91,7 +91,7 @@ def test_pool_save_load_roundtrip(small_market, small_cfg, tmp_path):
 
 
 def test_duplicate_is_penalised(small_market, small_cfg):
-    from graphalpha.grammar import build_from_keys
+    from peeralpha.grammar import build_from_keys
     vocab = Vocab(small_cfg.graphs)
     pool = AlphaPool(small_market, small_cfg, vocab)
     node = build_from_keys(vocab, ["feat:close", "win:5", "Delta"])
@@ -130,7 +130,7 @@ def test_repeated_formula_gets_flat_penalty(small_market, small_cfg):
 
 
 def test_longshort_backtest_is_market_neutral():
-    from graphalpha.backtest import longshort_backtest
+    from peeralpha.backtest import longshort_backtest
     torch.manual_seed(0)
     ret = torch.randn(120, 50) * 0.01 + 0.002          # common drift must not show up in L/S
     sig = torch.randn(120, 50)

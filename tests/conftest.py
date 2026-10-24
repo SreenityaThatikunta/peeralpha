@@ -5,9 +5,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from graphalpha.config import Config  # noqa: E402
-from graphalpha.market import Market  # noqa: E402
-from graphalpha.synthetic import make_synthetic  # noqa: E402
+from peeralpha.config import Config  # noqa: E402
+from peeralpha.market import Market  # noqa: E402
+from peeralpha.synthetic import make_synthetic  # noqa: E402
 
 
 @pytest.fixture(scope="session")

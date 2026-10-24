@@ -12,10 +12,10 @@ import torch
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo root
 
-from graphalpha.config import Config
-from graphalpha.expr import Node, evaluate
-from graphalpha.metrics import daily_ic, zscore_rows
-from graphalpha.runner import build_market
+from peeralpha.config import Config
+from peeralpha.expr import Node, evaluate
+from peeralpha.metrics import daily_ic, zscore_rows
+from peeralpha.runner import build_market
 
 
 def feat(n): return Node("feat", name=n)

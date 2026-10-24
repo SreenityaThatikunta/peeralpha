@@ -24,7 +24,7 @@ import pandas as pd
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))  # repo root
 
-from graphalpha.data import assemble
+from peeralpha.data import assemble
 
 # Yahoo symbol (without ".NS") -> sector
 UNIVERSE: Dict[str, str] = {

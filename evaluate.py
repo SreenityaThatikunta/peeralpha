@@ -16,14 +16,14 @@ from typing import Dict, List
 import numpy as np
 import torch
 
-from graphalpha.backtest import longshort_backtest, topk_backtest
-from graphalpha.config import Config
-from graphalpha.metrics import daily_ic, nanmean
-from graphalpha.plotting import (plot_ablation, plot_cumulative, plot_pool_corr,
+from peeralpha.backtest import longshort_backtest, topk_backtest
+from peeralpha.config import Config
+from peeralpha.metrics import daily_ic, nanmean
+from peeralpha.plotting import (plot_ablation, plot_cumulative, plot_pool_corr,
                                  plot_training_curves)
-from graphalpha.pool import AlphaPool
-from graphalpha.runner import build_market
-from graphalpha.vocab import Vocab
+from peeralpha.pool import AlphaPool
+from peeralpha.runner import build_market
+from peeralpha.vocab import Vocab
 
 
 def evaluate_run(run_dir: str, market_cache: Dict) -> Dict:

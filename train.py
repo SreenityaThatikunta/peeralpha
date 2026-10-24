@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import argparse
 
-from graphalpha.config import Config
-from graphalpha.runner import train
+from peeralpha.config import Config
+from peeralpha.runner import train
 
 
 def main() -> None:
