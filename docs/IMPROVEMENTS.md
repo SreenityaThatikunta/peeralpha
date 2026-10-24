@@ -19,9 +19,11 @@ existing graph vs no-graph tables therefore say nothing about graph operators ye
 | 2 | Ridge combiner (`weighting: ridge`, drop smallest \|w\| when full), `pool_capacity` 20, `dup_threshold` 0.9 | done |
 | 3 | Scale-free features `$ret`, `$ret5`, `$vrel`; `gop_zscore` z-scores graph-operator inputs | done |
 | 4 | Synthetic: `leader_of` saved, `graph_residual` (corr/lead on sector-demeaned returns), lead-graph precision + new formulas in `scripts/sanity_check.py`, `configs/v2_*.yaml` | done |
-| 5 | NSE: merge singleton / 2-stock sectors, residual corr graph | todo |
-| 6 | Evaluation: 10 seeds, walk-forward windows, paired tests, H=5 on NSE | todo |
-| 7 | Backtest: long-short / excess Sharpe; point-in-time universe | todo |
+| 5 | NSE: sectors under `min_sector_size=3` merged into the closest large sector; residual corr graph via `graph_residual` | done |
+| 6 | Evaluation: `scripts/walk_forward.py` (3 expanding windows), paired seed/window table vs `--baseline` in `evaluate.py` | done |
+| 6 | Evaluation: 10 seeds, H=5 on NSE | run-time choice (`--seeds`, `--set horizon=5`) |
+| 7 | Backtest: long-short top/bottom 20% (`LS Sharpe`, `LS AnnRet` columns) | done |
+| 7 | Point-in-time universe (survivorship) | todo |
 | 8 | Cache formula evaluations; regenerate `reports/SUMMARY.md` | todo |
 
 Old run configs keep their behaviour: `Config.from_json` fills `gop_zscore`/`graph_residual`
@@ -56,7 +58,14 @@ python run_suite.py --data data/synthetic_relational_v2.npz --tag v2rel --seeds 
 python run_suite.py --data data/nse100.npz --tag v2nse --seeds 0 1 2 3 4 \
   --methods v2_nograph v2_sector v2_graph_all v2_random_nograph \
   --steps 300000 --jobs 2 --threads 2
+
+# walk-forward on NSE (3 windows x 3 seeds; report in reports/v2nse_wf/)
+python scripts/walk_forward.py --data data/nse100.npz --tag v2nse --seeds 0 1 2 \
+  --methods v2_nograph v2_sector v2_graph_all v2_random_nograph --steps 300000 --jobs 3
 ```
+
+Add `--baseline v2_nograph` to `run_suite.py` (or `evaluate.py`) for the paired table;
+a method is only better if the mean paired difference is clearly positive (|t| > 2).
 
 Check `log.csv` while it runs: `mean_len` should stay above 5, `frac_unique` above 0.5, and
 `n_accepted` should keep growing past 50k steps.
