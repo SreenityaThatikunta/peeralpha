@@ -10,7 +10,7 @@ import yaml
 
 
 # behaviour of runs saved before a key existed (only keys that change formula values)
-LEGACY_DEFAULTS: Dict[str, Any] = {"gop_zscore": False, "graph_residual": False}
+LEGACY_DEFAULTS: Dict[str, Any] = {"gop_zscore": False, "graph_residual": False, "min_sector_size": 1}
 
 
 @dataclass
@@ -35,6 +35,7 @@ class Config:
     graph_step: int = 5                 # graph refresh period (days)
     graph_residual: bool = False        # build corr/lead graphs on sector-demeaned returns
     gop_zscore: bool = True             # z-score graph-operator inputs per day (scale-free peers)
+    min_sector_size: int = 3            # smaller sectors are merged into the closest large one
 
     # ---- formula language / environment ------------------------------
     max_len: int = 15

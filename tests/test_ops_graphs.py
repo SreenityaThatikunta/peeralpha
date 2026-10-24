@@ -120,3 +120,18 @@ def test_gop_zscore_removes_price_scale(small_market):
     finally:
         small_market.gop_zscore = False
     assert torch.allclose(a, b, atol=1e-4, equal_nan=True)
+
+
+def test_small_sectors_are_merged(tmp_path):
+    from graphalpha.market import Market
+    from graphalpha.synthetic import make_synthetic
+    path = str(tmp_path / "syn.npz")
+    d = make_synthetic(path, n_stocks=40, start="2011-01-03", end="2014-12-31", n_sectors=5, seed=3)
+    d["sector_ids"] = d["sector_ids"].copy()
+    d["sector_ids"][0] = 7                               # a singleton sector
+    np.savez(path, **d)
+    splits = {"train": ["2011-01-01", "2012-12-31"], "valid": ["2013-01-01", "2013-12-31"],
+              "test": ["2014-01-01", "2014-12-31"]}
+    m = Market(path, 5, splits, ["sector"], graph_k=5, device="cpu", min_sector_size=3)
+    assert np.bincount(m.sector_ids).max() > 0
+    assert m.sector_ids[0] != 7 and (np.bincount(m.sector_ids)[np.bincount(m.sector_ids) > 0] >= 3).all()

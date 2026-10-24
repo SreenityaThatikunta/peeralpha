@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -38,6 +39,7 @@ class Market:
         cache_dir: Optional[str] = None,
         gop_zscore: bool = False,
         graph_residual: bool = False,
+        min_sector_size: int = 1,
     ):
         z = np.load(path, allow_pickle=False)
         self.path = path
@@ -68,6 +70,8 @@ class Market:
         self.target = target
 
         self._ranges = {k: self._date_range(*v) for k, v in splits.items()}
+        if min_sector_size > 1:
+            self.sector_ids = self._merge_small_sectors(ret, min_sector_size)
         self.graph_names = list(graph_names)
         self._graphs: Dict[str, NeighborGraph] = {}
         if graph_names:
@@ -76,11 +80,34 @@ class Market:
             built = build_graphs(
                 gret.cpu(), self.sector_ids, graph_names, train_hi,
                 graph_window, graph_step, graph_k, cache_dir=cache_dir,
-                cache_key=f"{os.path.abspath(path)}|{os.path.getmtime(path)}|res={int(graph_residual)}",
+                cache_key=f"{os.path.abspath(path)}|{os.path.getmtime(path)}|res={int(graph_residual)}"
+                          f"|minsec={min_sector_size}",
             )
             self._graphs = {n: g.to(self.device) for n, g in built.items()}
 
     # ------------------------------------------------------------------
+    def _merge_small_sectors(self, ret: torch.Tensor, min_size: int) -> np.ndarray:
+        """Move stocks of sectors smaller than ``min_size`` into the large sector whose mean train
+        return they track best (a sector of 1-2 stocks gives NaN or single-peer graph features)."""
+        lo, hi = self._ranges["train"]
+        R = ret[lo:hi].cpu().numpy()
+        sec = self.sector_ids.copy()
+        counts = np.bincount(sec, minlength=sec.max() + 1)
+        big = [s for s in range(len(counts)) if counts[s] >= min_size]
+        if not big:
+            return sec
+        with warnings.catch_warnings():                 # days before any listing are all-NaN
+            warnings.simplefilter("ignore", RuntimeWarning)
+            means = np.stack([np.nanmean(R[:, sec == s], axis=1) for s in big], axis=1)   # [T, S]
+        for i in np.flatnonzero(counts[sec] < min_size):
+            x = R[:, i]
+            ok = np.isfinite(x) & np.isfinite(means).all(1)
+            if ok.sum() < 20:
+                continue
+            c = [np.corrcoef(x[ok], means[ok, j])[0, 1] for j in range(len(big))]
+            sec[i] = big[int(np.nanargmax(c))]
+        return sec
+
     def _sector_demeaned(self, ret: torch.Tensor) -> torch.Tensor:
         """Daily return minus its sector's mean that day (idiosyncratic part for corr/lead graphs)."""
         out = ret.clone()

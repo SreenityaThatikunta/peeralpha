@@ -40,6 +40,7 @@ def build_market(cfg: Config) -> Market:
         cfg.graphs, cfg.graph_k, cfg.graph_window, cfg.graph_step,
         device=cfg.compute_device, cache_dir=cache,
         gop_zscore=cfg.gop_zscore, graph_residual=cfg.graph_residual,
+        min_sector_size=cfg.min_sector_size,
     )
 
 
