@@ -19,4 +19,4 @@ Downloads are cached per stock under `data/cache/` so an interrupted fetch resum
 `data/cache/graphs_*.pt` are neighbour-graph caches built automatically on first use.
 
 Each `.npz` holds the price/volume tensors (open, high, low, close, volume, vwap), dates,
-tickers and sector ids, in the format produced by `graphalpha.data.assemble`.
+tickers and sector ids, in the format produced by `peeralpha.data.assemble`.

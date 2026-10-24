@@ -1,4 +1,4 @@
-# GraphAlpha-RL
+# PeerAlpha
 
 Graph-aware symbolic alpha mining with reinforcement learning.
 
@@ -27,13 +27,13 @@ complexity-shaped reward, curriculum and the AST graph-attention policy are new 
 | **State** | Dict: `tokens` (`L=15` token ids, 0-padded), `adj` (`15x15` operator→operand edges of the partial formula tree), `top` (positions of the top-3 stack subtrees), `ctx` (4 numbers: remaining budget, graph-ops-enabled flag, pool fill, current pool IC). |
 | **Action** | Discrete next token (≈ 50): 6 features, 10 constants, 5 windows, 3 graph ids, 3 unary + 6 binary + 9 rolling + 2 pair-rolling + 6 graph operators, `<SEP>`. A grammar stack provides an **action mask** so only completable, type-correct tokens are legal. |
 | **Reward** | 0 until the formula ends, then `R = s·(ΔIC_pool + β·(1−max\|ρ\|)·\|IC\|) − γ·len/budget`; invalid formula `−0.5`, near-duplicate (`\|ρ\|>0.99`) `−0.2`. |
-| **Environment** | Custom Gymnasium env (`graphalpha/env.py`): a formula builder + GPU/CPU evaluator on daily stock data (NSE-100 or CSI 300, or a synthetic market) + the alpha pool. |
+| **Environment** | Custom Gymnasium env (`peeralpha/env.py`): a formula builder + GPU/CPU evaluator on daily stock data (NSE-100 or CSI 300, or a synthetic market) + the alpha pool. |
 | **Algorithm** | MaskablePPO (`sb3-contrib`) with a custom **graph-attention** feature extractor over the partial formula tree (or an LSTM baseline). |
 
 ## Repository layout
 
 ```
-graphalpha/
+peeralpha/
   config.py     experiment config (dataclass <-> YAML, CLI overrides)
   data.py       market assembly + Baostock CSI 300 downloader
   universe.py   stock universes (live / built-in constituent lists)
@@ -63,7 +63,7 @@ train.py  evaluate.py  run_suite.py
 ## Installation
 
 ```bash
-conda create -n graphalpha python=3.10 -y && conda activate graphalpha
+conda create -n peeralpha python=3.10 -y && conda activate peeralpha
 pip install -r requirements.txt
 pytest -q                         # ~1 min, runs offline on synthetic data
 ```

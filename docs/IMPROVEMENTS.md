@@ -47,7 +47,7 @@ setting where graph operators must win before trying NSE.
 
 ```bash
 # regenerate the relational market with ground-truth leaders
-python -m graphalpha.data --synthetic --regime relational --out data/synthetic_relational_v2.npz
+python -m peeralpha.data --synthetic --regime relational --out data/synthetic_relational_v2.npz
 
 # synthetic test of graph operators (H=5)
 python run_suite.py --data data/synthetic_relational_v2.npz --tag v2rel --seeds 0 1 2 \

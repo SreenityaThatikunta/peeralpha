@@ -1,4 +1,4 @@
-# GraphAlpha-RL — experiment summary
+# PeerAlpha — experiment summary
 
 Test metrics use the pool snapshot with the best *validation* IC. `±` = std over seeds.
 
