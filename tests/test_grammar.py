@@ -73,3 +73,27 @@ def test_formula_evaluates_to_finite_values(small_market):
     out = evaluate(node, small_market, 600)
     assert out.shape == (600, small_market.N)
     assert torch.isfinite(out[200:]).float().mean() > 0.5
+
+
+def test_sep_masked_before_min_len():
+    vocab = Vocab(["sector"])
+    b = FormulaBuilder(vocab, max_len=15, min_len=3)
+    b.push(vocab.lookup("feat:close").id)
+    assert not b.valid_mask()[vocab.sep_id]
+    b.push(vocab.lookup("Abs").id)
+    assert not b.valid_mask()[vocab.sep_id]
+    b.push(vocab.lookup("CsRank").id)
+    assert b.valid_mask()[vocab.sep_id]
+    rng = np.random.default_rng(2)
+    for _ in range(300):                          # min_len never deadlocks the grammar
+        b.reset(15, True)
+        while True:
+            mask = b.valid_mask()
+            assert mask.any()
+            a = int(rng.choice(np.flatnonzero(mask)))
+            if vocab[a].kind == "sep" or len(b) >= 15:
+                break
+            b.push(a)
+            if len(b) >= 15:
+                break
+        assert len(b) >= 3 and b.is_complete()

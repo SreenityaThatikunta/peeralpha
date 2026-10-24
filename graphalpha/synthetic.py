@@ -85,6 +85,7 @@ def make_synthetic(
         codes=np.array([f"SYN{i:03d}" for i in range(N)]),
         sector_ids=sector.astype(np.int64),
         sector_names=np.array([f"S{s}" for s in range(n_sectors)]),
+        leader_of=leader_of.astype(np.int64),            # ground truth, for checking the lead graph
         open=open_.astype(np.float32), high=high.astype(np.float32), low=low.astype(np.float32),
         close=close.astype(np.float32), volume=vol.astype(np.float32), vwap=vwap.astype(np.float32),
     )

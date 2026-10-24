@@ -6,6 +6,7 @@ from typing import Tuple, Union
 
 import torch
 
+from .metrics import zscore_rows
 from .ops import FEATURES, REGISTRY
 
 _FEATURE_INDEX = {name: i for i, name in enumerate(FEATURES)}
@@ -65,5 +66,7 @@ def evaluate(node: Node, market, upto: int) -> Union[torch.Tensor, float]:
         return spec.fn(evaluate(a[0], market, upto), evaluate(a[1], market, upto), int(a[2].value))
     if spec.kind == "gop":
         x = evaluate(a[0], market, upto)
+        if getattr(market, "gop_zscore", False):
+            x = zscore_rows(x, min_valid=2)      # compare peers on one scale, not raw price levels
         return spec.fn(x, market.graph(a[1].name))
     raise ValueError(f"unknown op kind {spec.kind}")

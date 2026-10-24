@@ -35,9 +35,10 @@ class _Item:
 
 
 class FormulaBuilder:
-    def __init__(self, vocab: Vocab, max_len: int = 15, allow_graph: bool = True):
+    def __init__(self, vocab: Vocab, max_len: int = 15, allow_graph: bool = True, min_len: int = 1):
         self.vocab = vocab
         self.cap = max_len                 # storage capacity (largest curriculum stage)
+        self.min_len = min_len             # <SEP> is masked until this many tokens are written
         self.reset(max_len, allow_graph)
 
     # ------------------------------------------------------------------
@@ -87,7 +88,7 @@ class FormulaBuilder:
             k = tok.kind
             ok = False
             if k == "sep":
-                ok = m == 1 and top == "expr"
+                ok = m == 1 and top == "expr" and used >= min(self.min_len, self.limit)
             elif k == "feat":
                 ok = (top in (None, "expr", "const")) and fits(m + 1, True)
             elif k == "const":

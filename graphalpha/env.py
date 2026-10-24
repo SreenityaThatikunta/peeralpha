@@ -3,7 +3,8 @@
 MDP
     state   s_t = (token ids so far, AST edges, top-of-stack roots, context)
     action  a_t = next token (discrete, ~50 choices; invalid ones are masked)
-    reward  0 until the formula ends; then pool-based reward (see pool.py)
+    reward  0 until the formula ends; then pool-based reward (see pool.py);
+            a formula already submitted in this run gets a flat ``-repeat_penalty``
     episode ends on <SEP> or when the length budget is used up
 """
 from __future__ import annotations
@@ -28,8 +29,9 @@ class AlphaEnv(gym.Env):
         super().__init__()
         self.mkt, self.pool, self.vocab, self.cfg = market, pool, vocab, cfg
         self.L = cfg.max_len
-        self.builder = FormulaBuilder(vocab, max_len=self.L)
+        self.builder = FormulaBuilder(vocab, max_len=self.L, min_len=cfg.min_tokens)
         self.episodes = 0
+        self.seen: set = set()                         # formulas submitted so far (str form)
         self.last_info: Dict = {}
 
         V = len(vocab)
@@ -85,10 +87,15 @@ class AlphaEnv(gym.Env):
             formula = "<incomplete>"
         else:
             node = b.node()
-            res = self.pool.try_add(node, len(b), self._stage_len)
-            if res.status == "accepted":
-                self.pool.set_last_keys(b.keys())
             formula = str(node)
+            if formula in self.seen:
+                from .pool import AddResult
+                res = AddResult(-self.cfg.repeat_penalty, "repeat")
+            else:
+                self.seen.add(formula)
+                res = self.pool.try_add(node, len(b), self._stage_len)
+                if res.status == "accepted":
+                    self.pool.set_last_keys(b.keys())
         info = {"formula": formula, "status": res.status, "ic": res.ic,
                 "max_mutual": res.max_mutual, "n_tokens": len(b), "parts": res.parts}
         self.last_info = info

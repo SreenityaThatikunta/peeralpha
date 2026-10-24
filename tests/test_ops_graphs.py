@@ -93,3 +93,30 @@ def test_graph_alpha_is_causal(small_market):
     both = torch.isfinite(a) & torch.isfinite(b)
     assert torch.allclose(a[both], b[both])
     assert torch.equal(torch.isfinite(a), torch.isfinite(b))
+
+
+def test_derived_features_are_returns(small_market):
+    from graphalpha.ops import FEATURES
+    close = small_market.feat[FEATURES.index("close")]
+    ret = small_market.feat[FEATURES.index("ret")]
+    ret5 = small_market.feat[FEATURES.index("ret5")]
+    assert torch.allclose(ret[1:], close[1:] / close[:-1] - 1, equal_nan=True)
+    assert torch.allclose(ret5[5:], close[5:] / close[:-5] - 1, equal_nan=True)
+    assert torch.allclose(ret, small_market.ret, equal_nan=True)
+
+
+def test_gop_zscore_removes_price_scale(small_market):
+    vocab = Vocab(["sector"])
+    node = build_from_keys(vocab, ["feat:close", "graph:sector", "NbrRel"])
+    T = small_market.T
+    small_market.gop_zscore = True
+    try:
+        a = evaluate(node, small_market, T)
+        idx = ops.FEATURES.index("close")
+        saved = small_market.feat[idx].clone()
+        small_market.feat[idx] = saved * 100.0              # rescale every price
+        b = evaluate(node, small_market, T)
+        small_market.feat[idx] = saved
+    finally:
+        small_market.gop_zscore = False
+    assert torch.allclose(a, b, atol=1e-4, equal_nan=True)

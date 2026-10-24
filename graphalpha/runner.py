@@ -20,7 +20,7 @@ from .vocab import Vocab
 
 LOG_FIELDS = [
     "timesteps", "episodes", "train_obj", "valid_ic", "valid_rank_ic", "pool_size",
-    "mean_return", "frac_valid", "frac_graph", "seconds",
+    "mean_return", "frac_valid", "frac_graph", "mean_len", "frac_unique", "n_accepted", "seconds",
 ]
 
 
@@ -39,6 +39,7 @@ def build_market(cfg: Config) -> Market:
         {"train": cfg.train, "valid": cfg.valid, "test": cfg.test},
         cfg.graphs, cfg.graph_k, cfg.graph_window, cfg.graph_step,
         device=cfg.compute_device, cache_dir=cache,
+        gop_zscore=cfg.gop_zscore, graph_residual=cfg.graph_residual,
     )
 
 
@@ -59,7 +60,11 @@ class RunLogger:
         self.returns = deque(maxlen=300)
         self.status = deque(maxlen=300)
         self.used_graph = deque(maxlen=300)
+        self.lengths = deque(maxlen=300)
+        self.formulas = deque(maxlen=300)
         self.best_valid = -1e9
+        self.frozen_rows = 0             # consecutive log rows with no accepted alpha
+        self._last_accepted = 0
         os.makedirs(run_dir, exist_ok=True)
         self._f = open(os.path.join(run_dir, "log.csv"), "w", newline="")
         self._w = csv.DictWriter(self._f, fieldnames=LOG_FIELDS)
@@ -69,6 +74,8 @@ class RunLogger:
         self.returns.append(ret)
         self.status.append(info.get("status") != "invalid")
         self.used_graph.append("G_" in info.get("formula", ""))
+        self.lengths.append(info.get("n_tokens", 0))
+        self.formulas.append(info.get("formula", ""))
 
     def log(self, timesteps: int) -> Dict:
         v = self.pool.evaluate_split("valid") if self.pool.size else {}
@@ -82,16 +89,25 @@ class RunLogger:
             "mean_return": float(np.mean(self.returns)) if self.returns else float("nan"),
             "frac_valid": float(np.mean(self.status)) if self.status else float("nan"),
             "frac_graph": float(np.mean(self.used_graph)) if self.used_graph else float("nan"),
+            # collapse alarms: a healthy agent writes long, varied formulas and keeps adding alphas
+            "mean_len": float(np.mean(self.lengths)) if self.lengths else float("nan"),
+            "frac_unique": len(set(self.formulas)) / len(self.formulas) if self.formulas else float("nan"),
+            "n_accepted": self.pool.n_accepted,
             "seconds": round(time.time() - self.t0, 1),
         }
         self._w.writerow(row)
         self._f.flush()
         self.pool.save(os.path.join(self.dir, "pool_latest.json"))
+        self.frozen_rows = 0 if self.pool.n_accepted > self._last_accepted else self.frozen_rows + 1
+        self._last_accepted = self.pool.n_accepted
         vic = row["valid_ic"]
         if vic == vic and vic > self.best_valid:
             self.best_valid = vic
             self.pool.save(os.path.join(self.dir, "pool_best_valid.json"))
         return row
+
+    def frozen(self, patience: int) -> bool:
+        return patience > 0 and self.frozen_rows >= patience
 
     def close(self) -> None:
         self._f.close()
@@ -117,6 +133,9 @@ def run_random(cfg: Config, run_dir: str, market: Optional[Market] = None, log_e
             row = logger.log(steps)
             print(f"[random] step {steps} obj={row['train_obj']:.4f} valid_ic={row['valid_ic']:.4f}", flush=True)
             next_log += log_every
+            if logger.frozen(cfg.freeze_patience):
+                print(f"[random] pool unchanged for {cfg.freeze_patience} logs; stopping", flush=True)
+                break
     logger.log(steps)
     logger.close()
 
@@ -135,6 +154,7 @@ def run_ppo(cfg: Config, run_dir: str, market: Optional[Market] = None) -> None:
         def __init__(self):
             super().__init__()
             self._ret = 0.0
+            self._stop = False
 
         def _on_step(self) -> bool:
             self._ret += float(self.locals["rewards"][0])
@@ -142,16 +162,20 @@ def run_ppo(cfg: Config, run_dir: str, market: Optional[Market] = None) -> None:
                 info = self.locals["infos"][0]
                 logger.episode_end(self._ret, info)
                 self._ret = 0.0
-            return True
+            return not self._stop
 
         def _on_rollout_end(self) -> None:
             row = logger.log(self.num_timesteps)
             print(
                 f"[ppo] step {self.num_timesteps} ep={row['episodes']} obj={row['train_obj']:.4f} "
                 f"valid_ic={row['valid_ic']:.4f} pool={row['pool_size']} "
-                f"valid%={row['frac_valid']:.2f} graph%={row['frac_graph']:.2f} t={row['seconds']}s",
+                f"valid%={row['frac_valid']:.2f} graph%={row['frac_graph']:.2f} "
+                f"len={row['mean_len']:.1f} uniq={row['frac_unique']:.2f} t={row['seconds']}s",
                 flush=True,
             )
+            if logger.frozen(cfg.freeze_patience):
+                print(f"[ppo] pool unchanged for {cfg.freeze_patience} rollouts; stopping", flush=True)
+                self._stop = True
 
     venv = DummyVecEnv([lambda: env])
     model = MaskablePPO(

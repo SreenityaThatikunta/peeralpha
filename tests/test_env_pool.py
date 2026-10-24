@@ -52,7 +52,8 @@ def test_env_episode_and_reward(small_market, small_cfg):
             assert np.isfinite(r)
             assert obs["tokens"].shape == (small_cfg.max_len,)
             assert env.observation_space.contains(obs)
-        assert info["status"] in ("invalid", "duplicate", "rejected", "accepted")
+        assert info["status"] in ("invalid", "duplicate", "rejected", "accepted", "repeat")
+        assert info["n_tokens"] >= min(small_cfg.min_tokens, small_cfg.max_len)
         seen_accept |= info["status"] == "accepted"
     assert seen_accept
     assert pool.size <= pool.capacity
@@ -66,10 +67,11 @@ def test_pool_objective_matches_reevaluation(small_market, small_cfg):
         done = False
         while not done:
             _, _, done, _, _ = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
-    # the incrementally maintained objective equals one recomputed from scratch
-    ens = torch.einsum("k,ktn->tn", pool._weights([m.ic for m in pool.members]),
-                       torch.stack([m.z for m in pool.members]))
-    assert abs(pool._objective(ens) - pool.obj) < 1e-5
+    # the incrementally maintained Gram/weights/objective equal ones recomputed from scratch
+    w_inc, obj_inc = pool.w.clone(), pool.obj
+    pool._refresh()
+    assert torch.allclose(pool.w, w_inc, rtol=1e-3, atol=1e-6)
+    assert abs(pool._objective(pool.ensemble()) - obj_inc) < 1e-5
 
 
 def test_pool_save_load_roundtrip(small_market, small_cfg, tmp_path):
@@ -97,3 +99,31 @@ def test_duplicate_is_penalised(small_market, small_cfg):
     again = pool.try_add(node, 3, 15)
     assert first.status == "accepted" and again.status == "duplicate"
     assert again.reward < 0
+
+
+def test_ic_weighting_still_supported(small_market, small_cfg):
+    from dataclasses import replace
+    cfg = replace(small_cfg, weighting="ic")
+    env, pool, vocab = _env(small_market, cfg)
+    rng = np.random.default_rng(7)
+    for _ in range(80):
+        env.reset()
+        done = False
+        while not done:
+            _, _, done, _, _ = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
+    assert torch.allclose(pool.w, pool._weights([m.ic for m in pool.members]))
+    assert abs(pool._objective(pool.ensemble()) - pool.obj) < 1e-5
+
+
+def test_repeated_formula_gets_flat_penalty(small_market, small_cfg):
+    env, pool, vocab = _env(small_market, small_cfg)
+    keys = ["feat:close", "win:5", "Delta"]
+    infos = []
+    for _ in range(2):
+        env.reset()
+        for k in keys:
+            _, r, done, _, info = env.step(vocab.lookup(k).id)
+        _, r, done, _, info = env.step(vocab.sep_id)
+        infos.append((r, info["status"]))
+    assert infos[0][1] == "accepted"
+    assert infos[1] == (-small_cfg.repeat_penalty, "repeat")

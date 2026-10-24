@@ -30,6 +30,9 @@ def candidates():
     r10 = op("Div", op("Delta", feat("close"), win(10)), op("Ref", feat("close"), win(10)))
     return {
         "5d return  [no graph]": r5,
+        "$ret5  [no graph]": feat("ret5"),
+        "NbrRel($ret5, sector)": op("NbrRel", feat("ret5"), graph("sector")),
+        "NbrMean($ret, lead)": op("NbrMean", feat("ret"), graph("lead")),
         "NbrRel(5d ret, sector)": op("NbrRel", r5, graph("sector")),
         "NbrRel(10d ret, sector)": op("NbrRel", r10, graph("sector")),
         "NbrRel(5d ret, corr)": op("NbrRel", r5, graph("corr")),
@@ -49,6 +52,21 @@ def split_ic(node, mkt, name):
     return float(ic.mean()), float(ic.mean() / (ic.std() + 1e-9))
 
 
+def lead_precision(mkt):
+    """Share of followers whose planted leader is among their lead-graph neighbours (synthetic only)."""
+    import numpy as np
+    z = np.load(mkt.path)
+    if "leader_of" not in z or "lead" not in mkt.graph_names:
+        return None
+    leader = torch.as_tensor(z["leader_of"], device=mkt.device)
+    follower = leader != torch.arange(mkt.N, device=mkt.device)
+    g = mkt.graph("lead")
+    lo, hi = mkt.ic_slice("test")
+    chunks = g.day2chunk[lo:hi].unique()
+    hit = (g.idx[chunks] == leader.view(1, -1, 1)) & g.mask[chunks]
+    return float(hit.any(-1)[:, follower].float().mean())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/graph_all.yaml")
@@ -65,6 +83,9 @@ def main():
             print(f"{label:36s} skipped: {e}")
             continue
         print(f"{label:36s} {row[0]:+8.4f} {row[1]:+8.4f} {row[2]:+8.4f}")
+    p = lead_precision(mkt)
+    if p is not None:
+        print(f"lead graph: true leader in top-{cfg.graph_k} for {p:.1%} of followers (test period)")
 
 
 if __name__ == "__main__":

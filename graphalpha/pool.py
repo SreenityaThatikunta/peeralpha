@@ -1,15 +1,19 @@
 """Alpha pool: the part of the environment that turns a finished formula into a reward.
 
 The pool keeps at most ``capacity`` alphas. Each member is z-scored cross-sectionally
-every day and combined with *fixed, parameter-free weights* (``w_i = IC_i``: signed, so a
-negatively-predictive alpha is automatically flipped). No regression is fitted — the only
-thing that learns anywhere in this project is the RL policy.
+every day and the members are combined linearly. ``weighting`` picks the weights:
+
+  * ``ridge`` : ridge regression of the z-scored train target on the members (AlphaGen-style
+                linear combiner, refit on every change; frozen at evaluation time)
+  * ``ic``    : ``w_i = IC_i`` (signed, so a negatively-predictive alpha is flipped)
+  * ``equal`` : ``w_i = sign(IC_i)``
 
 Adding a candidate:
   1. invalid / constant / mostly-NaN                  -> penalty
   2. near-duplicate of a member (|mutual IC| > thr)   -> penalty
-  3. otherwise tentatively add; if over capacity drop the member whose removal hurts the
-     ensemble IC least (possibly the newcomer itself).
+  3. otherwise tentatively add; if over capacity drop one member (possibly the newcomer):
+     the smallest |ridge weight| for ``ridge``, else the member whose removal hurts the
+     ensemble IC least.
 Reward = scale * (Delta ensemble IC + beta * novelty bonus) - gamma * length penalty.
 """
 from __future__ import annotations
@@ -53,9 +57,16 @@ class AlphaPool:
         self.capacity = cfg.pool_capacity
         self.lo, self.hi = market.ic_slice("train")
         self.y = market.target[self.lo:self.hi]
+        yz = zscore_rows(self.y)
+        self._ymask = torch.isfinite(yz).to(self.y.dtype)
+        self._yz = torch.nan_to_num(yz, nan=0.0)
         self.members: List[Member] = []
+        self.w = torch.zeros(0, device=market.device)     # current combination weights
+        self._G = torch.zeros(0, 0, device=market.device)  # member Gram matrix (ridge)
+        self._b = torch.zeros(0, device=market.device)     # member-target products (ridge)
         self.obj = 0.0                   # ensemble IC on train slice
         self.eval_count = 0
+        self.n_accepted = 0
 
     # ------------------------------------------------------------------
     @property
@@ -67,9 +78,39 @@ class AlphaPool:
         return torch.sign(w) if self.cfg.weighting == "equal" else w
 
     def weights(self) -> np.ndarray:
-        if not self.members:
-            return np.zeros(0)
-        return self._weights([m.ic for m in self.members]).cpu().numpy()
+        return self.w.cpu().numpy()
+
+    def _ridge(self, G: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        k = G.shape[0]
+        lam = self.cfg.ridge_lambda * float(G.diagonal().mean().clamp_min(1e-12))
+        return torch.linalg.solve(G + lam * torch.eye(k, dtype=G.dtype, device=G.device), b)
+
+    def _fit(self, ics: List[float], G: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return self._ridge(G, b) if self.cfg.weighting == "ridge" else self._weights(ics)
+
+    def _stats(self, zf: torch.Tensor):
+        """Gram row of ``zf`` against the members, its own norm and its target product."""
+        zm = zf * self._ymask
+        row = torch.stack([(zm * m.z).sum() for m in self.members]) if self.members \
+            else torch.zeros(0, device=zf.device)
+        return row, (zm * zf).sum(), (zm * self._yz).sum()
+
+    def _refresh(self) -> None:
+        """Recompute Gram/target products and weights from scratch (used after load)."""
+        k = len(self.members)
+        self._G = torch.zeros(k, k, device=self.mkt.device)
+        self._b = torch.zeros(k, device=self.mkt.device)
+        for i, m in enumerate(self.members):
+            zm = m.z * self._ymask
+            self._b[i] = (zm * self._yz).sum()
+            for j in range(i + 1):
+                self._G[i, j] = self._G[j, i] = (zm * self.members[j].z).sum()
+        self.w = self._fit([m.ic for m in self.members], self._G, self._b) if k \
+            else torch.zeros(0, device=self.mkt.device)
+
+    def ensemble(self) -> torch.Tensor:
+        """Current ensemble on the train slice."""
+        return torch.einsum("k,ktn->tn", self.w, torch.stack([m.z for m in self.members]))
 
     def _objective(self, ensemble: torch.Tensor) -> float:
         ic = daily_ic(ensemble, self.y)
@@ -117,23 +158,40 @@ class AlphaPool:
 
         ics = [m.ic for m in self.members] + [ic]
         Z = torch.stack([m.z for m in self.members] + [zf])
-        w = self._weights(ics)
+        K = len(ics)
+        row, own, bn = self._stats(zf)
+        G = torch.zeros(K, K, device=zf.device)
+        G[:-1, :-1], G[-1, :-1], G[:-1, -1], G[-1, -1] = self._G, row, row, own
+        b = torch.cat([self._b, bn.view(1)])
+        w = self._fit(ics, G, b)
         ens = torch.einsum("k,ktn->tn", w, Z)
 
         drop: Optional[int] = None
-        if len(ics) <= self.capacity:
+        w_new = w
+        if K <= self.capacity:
             obj_new = self._objective(ens)
             retained = True
+        elif cfg.weighting == "ridge":
+            j = int(w.abs().argmin())
+            if j == K - 1:                   # newcomer gets the smallest weight -> pool unchanged
+                obj_new, retained = self.obj, False
+            else:
+                keep = [i for i in range(K) if i != j]
+                w_new = self._fit([ics[i] for i in keep], G[keep][:, keep], b[keep])
+                obj_new = self._objective(torch.einsum("k,ktn->tn", w_new, Z[keep]))
+                retained, drop = True, j
         else:
             best_obj, best_j = -1e9, -1
-            for j in range(len(ics)):
+            for j in range(K):
                 o = self._objective(ens - w[j] * Z[j])
                 if o > best_obj:
                     best_obj, best_j = o, j
-            if best_j == len(ics) - 1:       # newcomer is the weakest link -> pool unchanged
+            if best_j == K - 1:              # newcomer is the weakest link -> pool unchanged
                 obj_new, retained = self.obj, False
             else:
                 obj_new, retained, drop = best_obj, True, best_j
+                keep = [i for i in range(K) if i != drop]
+                w_new = self._weights([ics[i] for i in keep])
 
         delta = obj_new - self.obj
         r_delta = delta
@@ -146,10 +204,15 @@ class AlphaPool:
         reward = cfg.reward_scale * (r_delta + novelty) - length_pen
 
         if retained:
-            if drop is not None:
-                del self.members[drop]
             self.members.append(Member(node, [], ic, zf))   # keys filled by caller
+            keep = list(range(K))
+            if drop is not None:
+                keep.remove(drop)
+                # keep the newcomer last so ``set_last_keys`` still addresses it
+                self.members = [self.members[i] for i in keep]
+            self._G, self._b, self.w = G[keep][:, keep], b[keep], w_new
             self.obj = obj_new
+            self.n_accepted += 1
         parts = {"delta": cfg.reward_scale * r_delta, "novelty": cfg.reward_scale * novelty, "length": -length_pen}
         return AddResult(reward, "accepted" if retained else "rejected", ic, max_mut, delta, parts)
 
@@ -170,8 +233,7 @@ class AlphaPool:
     def signal(self, split: str) -> torch.Tensor:
         """Ensemble signal ``[hi, N]`` for days ``[0, hi)`` of the split's scoring window."""
         sigs = self.member_signals(split)
-        w = self._weights([m.ic for m in self.members])
-        return torch.einsum("k,ktn->tn", w, torch.stack(sigs))
+        return torch.einsum("k,ktn->tn", self.w, torch.stack(sigs))
 
     def evaluate_split(self, split: str) -> Dict[str, float]:
         if not self.members:
@@ -212,10 +274,7 @@ class AlphaPool:
                 continue
             z, ic = cand
             pool.members.append(Member(node, item["keys"], ic, torch.nan_to_num(z, nan=0.0)))
+        pool._refresh()
         if pool.members:
-            ens = torch.einsum(
-                "k,ktn->tn", pool._weights([m.ic for m in pool.members]),
-                torch.stack([m.z for m in pool.members]),
-            )
-            pool.obj = pool._objective(ens)
+            pool.obj = pool._objective(pool.ensemble())
         return pool

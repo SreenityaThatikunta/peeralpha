@@ -9,6 +9,10 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
+# behaviour of runs saved before a key existed (only keys that change formula values)
+LEGACY_DEFAULTS: Dict[str, Any] = {"gop_zscore": False, "graph_residual": False}
+
+
 @dataclass
 class Config:
     # ---- bookkeeping -------------------------------------------------
@@ -29,22 +33,27 @@ class Config:
     graph_k: int = 8                    # neighbours kept per stock
     graph_window: int = 60              # rolling window for dynamic graphs
     graph_step: int = 5                 # graph refresh period (days)
+    graph_residual: bool = False        # build corr/lead graphs on sector-demeaned returns
+    gop_zscore: bool = True             # z-score graph-operator inputs per day (scale-free peers)
 
     # ---- formula language / environment ------------------------------
     max_len: int = 15
+    min_tokens: int = 3                 # <SEP> masked before this many tokens (no bare-feature alphas)
     curriculum: List[List[Any]] = field(
         default_factory=lambda: [[0, 9, True], [2000, 12, True], [6000, 15, True]]
     )  # rows: [episode_threshold, max_len, graph_ops_allowed]
 
     # ---- alpha pool / reward -----------------------------------------
-    pool_capacity: int = 10
-    weighting: str = "ic"               # "ic" | "equal"
-    dup_threshold: float = 0.99
+    pool_capacity: int = 20
+    weighting: str = "ridge"            # "ridge" | "ic" | "equal"
+    ridge_lambda: float = 0.1           # ridge strength, relative to the mean Gram diagonal
+    dup_threshold: float = 0.9
     reward_scale: float = 10.0
     beta_div: float = 0.3               # diversity bonus weight
-    gamma_len: float = 0.05             # complexity penalty weight
-    invalid_penalty: float = 0.5
-    dup_penalty: float = 0.2
+    gamma_len: float = 0.0              # complexity penalty weight (>0 drove the 1-token collapse)
+    invalid_penalty: float = 0.1
+    dup_penalty: float = 0.1
+    repeat_penalty: float = 0.1         # formula already submitted earlier in this run
     dense_reward: bool = False          # rejected candidates still get graded reward (fixes frozen-pool zero signal)
     robust_folds: int = 0               # >=2: reward uses mean(fold IC) - lambda*std(fold IC) over train folds
     robust_lambda: float = 1.0          # penalty on IC instability across train sub-periods
@@ -61,12 +70,13 @@ class Config:
     n_epochs: int = 4
     gamma: float = 1.0
     gae_lambda: float = 0.95
-    ent_coef: float = 0.02
+    ent_coef: float = 0.05
     clip_range: float = 0.2
 
     # ---- devices -----------------------------------------------------
     compute_device: str = "auto"        # formula evaluation (GPU if available)
     policy_device: str = "cpu"
+    freeze_patience: int = 0            # >0: stop once the pool has not changed for this many log rows
 
     # ------------------------------------------------------------------
     @classmethod
@@ -90,8 +100,12 @@ class Config:
 
     @classmethod
     def from_json(cls, path: str) -> "Config":
+        """Load a saved run config; keys it predates get the value that run actually used."""
         with open(path, "r") as f:
-            return cls.from_dict(json.load(f))
+            d = json.load(f)
+        for k, v in LEGACY_DEFAULTS.items():
+            d.setdefault(k, v)
+        return cls.from_dict(d)
 
     def apply_overrides(self, items: List[str]) -> None:
         """Apply ``key=value`` strings (value parsed as YAML)."""

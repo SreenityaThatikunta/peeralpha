@@ -29,7 +29,8 @@ from graphalpha.vocab import Vocab
 def evaluate_run(run_dir: str, market_cache: Dict) -> Dict:
     cfg = Config.from_json(os.path.join(run_dir, "config.json"))
     key = (cfg.data_path, tuple(cfg.graphs), cfg.graph_k, cfg.graph_window, cfg.graph_step,
-           tuple(cfg.train), tuple(cfg.valid), tuple(cfg.test), cfg.horizon)
+           tuple(cfg.train), tuple(cfg.valid), tuple(cfg.test), cfg.horizon,
+           cfg.gop_zscore, cfg.graph_residual)
     if key not in market_cache:
         market_cache[key] = build_market(cfg)
     market = market_cache[key]
