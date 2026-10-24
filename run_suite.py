@@ -46,6 +46,7 @@ def main() -> None:
     ap.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE", help="extra config overrides")
     ap.add_argument("--jobs", type=int, default=1, help="parallel training processes")
     ap.add_argument("--threads", type=int, default=2, help="CPU threads per job")
+    ap.add_argument("--baseline", default=None, help="method for the paired comparison table, e.g. nograph")
     ap.add_argument("--no_eval", action="store_true")
     ap.add_argument("--dry_run", action="store_true")
     args = ap.parse_args()
@@ -92,6 +93,8 @@ def main() -> None:
         return
     report = args.report_dir or os.path.join("reports", args.tag)
     cmd = [sys.executable, "evaluate.py", *finished, "--out", report]
+    if args.baseline:
+        cmd += ["--baseline", f"{args.tag}_{args.baseline}"]
     print(f"[suite] {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, check=True)
 

@@ -16,7 +16,7 @@ from typing import Dict, List
 import numpy as np
 import torch
 
-from graphalpha.backtest import topk_backtest
+from graphalpha.backtest import longshort_backtest, topk_backtest
 from graphalpha.config import Config
 from graphalpha.metrics import daily_ic, nanmean
 from graphalpha.plotting import (plot_ablation, plot_cumulative, plot_pool_corr,
@@ -30,7 +30,7 @@ def evaluate_run(run_dir: str, market_cache: Dict) -> Dict:
     cfg = Config.from_json(os.path.join(run_dir, "config.json"))
     key = (cfg.data_path, tuple(cfg.graphs), cfg.graph_k, cfg.graph_window, cfg.graph_step,
            tuple(cfg.train), tuple(cfg.valid), tuple(cfg.test), cfg.horizon,
-           cfg.gop_zscore, cfg.graph_residual)
+           cfg.gop_zscore, cfg.graph_residual, cfg.min_sector_size)
     if key not in market_cache:
         market_cache[key] = build_market(cfg)
     market = market_cache[key]
@@ -48,6 +48,9 @@ def evaluate_run(run_dir: str, market_cache: Dict) -> Dict:
     for k, v in bt.items():
         if k not in ("port", "bench"):
             res[f"bt_{k}"] = v
+    ls = longshort_backtest(sig, market.ret, lo, hi, k=max(5, market.N // 5), rebalance=cfg.horizon)
+    for k in ("sharpe", "annual_return", "max_drawdown"):
+        res[f"ls_{k}"] = ls[k]
 
     # diversity: mean |pairwise corr| of the pool alphas on test
     sigs = [s[lo:hi] for s in pool.member_signals("test")]
@@ -68,35 +71,76 @@ def evaluate_run(run_dir: str, market_cache: Dict) -> Dict:
     return res
 
 
+def _window_and_method(name: str):
+    """``v2nse_w1_v2_graph_all`` -> (``w1``, ``v2_graph_all``); names without ``_w<k>_`` keep the tag."""
+    parts = name.split("_")
+    for i, p in enumerate(parts):
+        if len(p) > 1 and p[0] == "w" and p[1:].isdigit():
+            return p, "_".join(parts[i + 1:])
+    return "", name
+
+
 def _ms(vals: List[float]) -> str:
     v = np.array(vals, dtype=float)
     return f"{np.nanmean(v):+.4f} ± {np.nanstd(v):.4f}" if len(v) > 1 else f"{v[0]:+.4f}"
+
+
+def paired_table(groups: "OrderedDict[str, List[Dict]]", baseline: str, metric: str = "test_ic") -> str:
+    """Per-seed difference of each method to ``baseline`` (same seed / window), mean ± s.e. and t."""
+    base = {(r["seed"], r.get("window", "")): r[metric] for r in groups[baseline]}
+    lines = [f"Paired {metric} difference vs `{baseline}` (matched seed and window)", "",
+             "| Method | pairs | mean diff | s.e. | t | wins |", "|---|---|---|---|---|---|"]
+    for name, rs in groups.items():
+        if name == baseline:
+            continue
+        d = np.array([r[metric] - base[(r["seed"], r.get("window", ""))] for r in rs
+                      if (r["seed"], r.get("window", "")) in base], dtype=float)
+        d = d[np.isfinite(d)]
+        if len(d) == 0:
+            continue
+        se = d.std(ddof=1) / np.sqrt(len(d)) if len(d) > 1 else float("nan")
+        t = d.mean() / se if se == se and se > 0 else float("nan")
+        lines.append(f"| {name} | {len(d)} | {d.mean():+.4f} | {se:.4f} | {t:+.2f} | {int((d > 0).sum())}/{len(d)} |")
+    return "\n".join(lines)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("runs", nargs="+")
     ap.add_argument("--out", default="reports")
+    ap.add_argument("--baseline", default=None, help="method name for the paired comparison table")
+    ap.add_argument("--group", default="name", choices=["name", "method"],
+                    help="'method' strips the window/tag prefix so walk-forward windows pool together")
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out, "figures"), exist_ok=True)
 
     cache: Dict = {}
     results = [evaluate_run(r, cache) for r in args.runs]
+    for r, d in zip(results, args.runs):
+        r["window"], r["method"] = _window_and_method(r["name"])
+    key = "method" if args.group == "method" else "name"
     groups: "OrderedDict[str, List[Dict]]" = OrderedDict()
     for r in results:
-        groups.setdefault(r["name"], []).append(r)
+        groups.setdefault(r[key], []).append(r)
     dirs: "OrderedDict[str, List[str]]" = OrderedDict()
     for r, d in zip(results, args.runs):
-        dirs.setdefault(r["name"], []).append(d)
+        dirs.setdefault(r[key], []).append(d)
 
     cols = [("valid_ic", "Valid IC"), ("test_ic", "Test IC"), ("test_rank_ic", "Test RankIC"),
             ("test_icir", "Test ICIR"), ("bt_sharpe", "Sharpe"), ("bt_annual_return", "AnnRet"),
-            ("bt_max_drawdown", "MaxDD"), ("pool_mean_abs_corr", "|corr|"), ("uses_graph", "#graph")]
+            ("bt_max_drawdown", "MaxDD"), ("ls_sharpe", "LS Sharpe"), ("ls_annual_return", "LS AnnRet"),
+            ("pool_mean_abs_corr", "|corr|"), ("uses_graph", "#graph")]
     lines = ["| Method | seeds | " + " | ".join(c[1] for c in cols) + " |",
              "|---|---|" + "|".join("---" for _ in cols) + "|"]
     for name, rs in groups.items():
         lines.append(f"| {name} | {len(rs)} | " + " | ".join(_ms([r[c[0]] for r in rs]) for c in cols) + " |")
     table = "\n".join(lines)
+    if args.baseline:
+        base = args.baseline if args.baseline in groups else next((g for g in groups if g.endswith(args.baseline)), None)
+        if base is None:
+            print(f"[eval] baseline '{args.baseline}' not found; skipping paired table")
+        else:
+            table += "\n\n" + paired_table(groups, base) + "\n\n" + paired_table(groups, base, "ls_sharpe")
     with open(os.path.join(args.out, "results_table.md"), "w") as f:
         f.write(table + "\n")
     print(table)

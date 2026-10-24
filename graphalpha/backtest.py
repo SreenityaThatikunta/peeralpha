@@ -6,6 +6,9 @@
 * Trading cost = ``cost`` x (sum of absolute weight changes) charged on rebalance days.
 * Benchmark = equal-weight average of all stocks with a valid return that day.
 
+``longshort_backtest`` is the market-neutral variant (long top-K, short bottom-K); its Sharpe
+is not inflated by market beta or a survivorship-biased universe the way the long-only one is.
+
 This is an *evaluation* rule only; nothing here is learned.
 """
 from __future__ import annotations
@@ -47,6 +50,33 @@ def topk_backtest(signal: torch.Tensor, ret: torch.Tensor, lo: int, hi: int,
 
     port, bench = np.array(port), np.array(bench)
     return {"port": port, "bench": bench, **_stats(port, bench), "avg_turnover": float(np.mean(turnover)) if turnover else 0.0}
+
+
+def longshort_backtest(signal: torch.Tensor, ret: torch.Tensor, lo: int, hi: int,
+                       k: int = 20, rebalance: int = 20, cost: float = 0.001) -> Dict:
+    sig = signal.detach().cpu().numpy()
+    r = ret.detach().cpu().numpy()
+    T, N = r.shape
+    w = np.zeros(N)
+    port = []
+    for t in range(lo, min(hi, T)):
+        c = 0.0
+        if (t - lo) % rebalance == 0 and 1 <= t <= sig.shape[0]:
+            s = sig[t - 1]                                          # information through t-1
+            ok = np.isfinite(s) & (np.abs(s) > 0)
+            if ok.sum() >= 2 * k:
+                order = np.argsort(np.where(ok, s, np.nan))         # NaNs sort last
+                n_ok = int(ok.sum())
+                new_w = np.zeros(N)
+                new_w[order[n_ok - k:n_ok]] = 0.5 / k
+                new_w[order[:k]] = -0.5 / k
+                c = cost * np.abs(new_w - w).sum()
+                w = new_w
+        port.append(float((np.nan_to_num(r[t], nan=0.0) * w).sum()) - c)
+    port = np.array(port)
+    st = _stats(port, np.zeros_like(port))
+    return {"port": port, "sharpe": st["sharpe"], "annual_return": st["annual_return"],
+            "max_drawdown": st["max_drawdown"]}
 
 
 def _stats(p: np.ndarray, b: np.ndarray) -> Dict[str, float]:

@@ -127,3 +127,25 @@ def test_repeated_formula_gets_flat_penalty(small_market, small_cfg):
         infos.append((r, info["status"]))
     assert infos[0][1] == "accepted"
     assert infos[1] == (-small_cfg.repeat_penalty, "repeat")
+
+
+def test_longshort_backtest_is_market_neutral():
+    from graphalpha.backtest import longshort_backtest
+    torch.manual_seed(0)
+    ret = torch.randn(120, 50) * 0.01 + 0.002          # common drift must not show up in L/S
+    sig = torch.randn(120, 50)
+    out = longshort_backtest(sig, ret + 0.05, 10, 120, k=10, rebalance=5, cost=0.0)
+    ref = longshort_backtest(sig, ret, 10, 120, k=10, rebalance=5, cost=0.0)
+    assert np.allclose(out["port"], ref["port"], atol=1e-6)
+    perfect = longshort_backtest(torch.roll(ret, -1, 0), ret, 10, 119, k=10, rebalance=1, cost=0.0)
+    assert perfect["annual_return"] > 0
+
+
+def test_paired_table_and_window_names():
+    import evaluate
+    assert evaluate._window_and_method("v2nse_w1_v2_graph_all") == ("w1", "v2_graph_all")
+    assert evaluate._window_and_method("syn300k_nograph") == ("", "syn300k_nograph")
+    groups = {"base": [{"seed": s, "window": "", "test_ic": 0.01} for s in range(3)],
+              "new": [{"seed": s, "window": "", "test_ic": 0.02 + 0.001 * s} for s in range(3)]}
+    table = evaluate.paired_table(groups, "base")
+    assert "| new | 3 | +0.0110 |" in table and "3/3" in table
