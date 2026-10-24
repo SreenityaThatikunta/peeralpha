@@ -1,0 +1,6 @@
+# v2: static sector graph only, z-scored graph-operator inputs
+name: v2_sector
+graphs: [sector]
+policy: gat
+gop_zscore: true
+freeze_patience: 50

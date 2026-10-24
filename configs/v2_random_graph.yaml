@@ -1,0 +1,8 @@
+# v2 baseline: uniformly random valid actions, full graph vocabulary
+name: v2_random_graph
+agent: random
+graphs: [sector, corr, lead]
+curriculum: []
+gop_zscore: true
+graph_residual: true
+graph_window: 250

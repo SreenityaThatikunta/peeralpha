@@ -1,0 +1,8 @@
+# v2 full model: sector + corr + lead; dynamic graphs on sector-demeaned returns over 250 days
+name: v2_graph_all
+graphs: [sector, corr, lead]
+policy: gat
+gop_zscore: true
+graph_residual: true
+graph_window: 250
+freeze_patience: 50

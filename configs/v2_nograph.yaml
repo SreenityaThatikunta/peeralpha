@@ -1,0 +1,5 @@
+# v2 baseline: no graph operators; new defaults (ridge pool of 20, no length penalty, min 3 tokens)
+name: v2_nograph
+graphs: []
+policy: gat
+freeze_patience: 50
