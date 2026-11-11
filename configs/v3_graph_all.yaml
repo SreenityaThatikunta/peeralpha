@@ -1,0 +1,18 @@
+# v3 full model: sector + corr + lead (dynamic graphs on sector-demeaned returns over 250 days)
+name: v3_graph_all
+graphs: [sector, corr, lead]
+policy: gat
+gop_zscore: true
+graph_residual: true
+graph_window: 250
+freeze_patience: 50
+# shared v3 settings: out-of-fold reward, sign-stability gate, small strongly-regularised pool,
+# scale-free leaf features only (no raw price levels), 5-day horizon
+horizon: 5
+features: [ret, ret5, vrel, ret20, cvwap, range]
+oof_folds: 4
+stable_folds: 4
+stable_min_frac: 0.75
+pool_capacity: 10
+ridge_lambda: 1.0
+swap_needs_gain: true
