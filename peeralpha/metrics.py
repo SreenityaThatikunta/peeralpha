@@ -69,3 +69,20 @@ def summarize(ic: torch.Tensor) -> Dict[str, float]:
         "pos_frac": float((v > 0).float().mean()),
         "n_days": int(f.sum()),
     }
+
+
+def newey_west_t(x: torch.Tensor, lags: int) -> float:
+    """t-statistic of the mean of a daily series with Newey-West (Bartlett) standard errors.
+
+    Daily ICs on an ``H``-day forward return overlap, so neighbouring days are correlated and the
+    plain ``mean / (std / sqrt(n))`` overstates significance; use ``lags = H``.
+    """
+    v = x[torch.isfinite(x)].double()
+    n = v.numel()
+    if n < 3:
+        return NAN
+    d = v - v.mean()
+    var = float((d * d).mean())
+    for l in range(1, min(lags, n - 1) + 1):
+        var += 2.0 * (1.0 - l / (lags + 1)) * float((d[l:] * d[:-l]).mean() * (n - l) / n)
+    return float(v.mean()) / (max(var, 1e-18) / n) ** 0.5

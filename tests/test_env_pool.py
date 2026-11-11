@@ -52,7 +52,7 @@ def test_env_episode_and_reward(small_market, small_cfg):
             assert np.isfinite(r)
             assert obs["tokens"].shape == (small_cfg.max_len,)
             assert env.observation_space.contains(obs)
-        assert info["status"] in ("invalid", "duplicate", "rejected", "accepted", "repeat")
+        assert info["status"] in ("invalid", "unstable", "duplicate", "rejected", "accepted", "repeat")
         assert info["n_tokens"] >= min(small_cfg.min_tokens, small_cfg.max_len)
         seen_accept |= info["status"] == "accepted"
     assert seen_accept
@@ -149,3 +149,114 @@ def test_paired_table_and_window_names():
               "new": [{"seed": s, "window": "", "test_ic": 0.02 + 0.001 * s} for s in range(3)]}
     table = evaluate.paired_table(groups, "base")
     assert "| new | 3 | +0.0110 |" in table and "3/3" in table
+
+
+def _fill(env, seed, n=80):
+    rng = np.random.default_rng(seed)
+    for _ in range(n):
+        env.reset()
+        done = False
+        while not done:
+            _, _, done, _, _ = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
+
+
+def test_oof_folds_are_purged(small_market, small_cfg):
+    T, H = 300, small_cfg.horizon
+    M, fold_of = AlphaPool._part_masks(T, 3, H, "cpu")
+    assert M.shape == (T, 4) and bool((M[:, 0] == 1).all())
+    assert torch.equal(M[:, 1:].sum(1), (fold_of < 3).float())
+    for f in range(2):
+        last = int(torch.nonzero(fold_of == f).max())
+        first_next = int(torch.nonzero(fold_of == f + 1).min())
+        assert first_next - last > H                      # no target window crosses into the next fold
+
+
+def test_oof_objective_matches_brute_force(small_market, small_cfg):
+    from dataclasses import replace
+    from peeralpha.metrics import nanmean
+    cfg = replace(small_cfg, oof_folds=3)
+    env, pool, vocab = _env(small_market, cfg)
+    _fill(env, 11)
+    assert pool.size >= 2
+    obj_inc, w_inc = pool.obj, pool.w.clone()
+    pool._refresh()
+    Z = torch.stack([m.z for m in pool.members])
+    assert torch.allclose(pool.w, w_inc, rtol=1e-3, atol=1e-6)
+    assert abs(pool._score(pool.w, pool._G, pool._b, Z) - obj_inc) < 1e-5
+    # brute force: ridge on the other folds' days, scored on the held-out fold's days
+    X = Z.permute(1, 2, 0) * pool._ymask.unsqueeze(-1)      # [T, N, k]
+    ens = torch.zeros_like(pool.y)
+    for f in range(3):
+        tr = (pool._fold_of != f) & (pool._fold_of < 3)
+        Xt, yt = X[tr].reshape(-1, X.shape[-1]), pool._yz[tr].reshape(-1)
+        G = Xt.T @ Xt
+        lam = cfg.ridge_lambda * float(G.diagonal().mean())
+        w = torch.linalg.solve(G + lam * torch.eye(G.shape[0]), Xt.T @ yt)
+        ens[pool._fold_of == f] = torch.einsum("k,ktn->tn", w, Z[:, pool._fold_of == f])
+    assert abs(nanmean(daily_ic(ens, pool.y)) - obj_inc) < 1e-4
+
+
+def test_oof_pool_save_load_roundtrip(small_market, small_cfg, tmp_path):
+    from dataclasses import replace
+    cfg = replace(small_cfg, oof_folds=2)
+    env, pool, vocab = _env(small_market, cfg)
+    _fill(env, 13, 60)
+    p = str(tmp_path / "pool.json")
+    pool.save(p)
+    loaded = AlphaPool.load(small_market, cfg, vocab, p)
+    assert loaded.size == pool.size and abs(loaded.obj - pool.obj) < 1e-4
+
+
+def test_stability_gate(small_market, small_cfg):
+    from dataclasses import replace
+    pool = AlphaPool(small_market, replace(small_cfg, stable_folds=4, stable_min_frac=0.75), Vocab(small_cfg.graphs))
+    steady = torch.full((400,), 0.02)
+    flip = torch.cat([torch.full((200,), 0.05), torch.full((200,), -0.01)])
+    assert pool._stable(steady, 0.02)
+    assert not pool._stable(flip, 0.02)                    # only 2 of 4 folds agree
+
+
+def test_unstable_candidate_is_penalised(small_market, small_cfg):
+    from dataclasses import replace
+    from peeralpha.grammar import build_from_keys
+    cfg = replace(small_cfg, stable_folds=4, stable_min_frac=1.0)
+    vocab = Vocab(cfg.graphs)
+    pool = AlphaPool(small_market, cfg, vocab)
+    statuses = set()
+    for keys in (["feat:close", "win:5", "Delta"], ["feat:volume", "win:10", "Std"], ["feat:ret", "win:20", "Mean"],
+                 ["feat:high", "feat:low", "Sub"], ["feat:vrel", "win:5", "Max"]):
+        res = pool.try_add(build_from_keys(vocab, keys), 3, 15)
+        statuses.add(res.status)
+        if res.status == "unstable":
+            assert res.reward == -cfg.unstable_penalty
+    assert pool.size == sum(1 for _ in pool.members)
+    assert statuses <= {"accepted", "unstable", "duplicate", "rejected"}
+
+
+def test_newey_west_t():
+    from peeralpha.metrics import newey_west_t
+    torch.manual_seed(0)
+    iid = torch.randn(5000) * 0.1 + 0.01
+    plain = float(iid.mean() / (iid.std(unbiased=False) / 5000 ** 0.5))
+    assert abs(newey_west_t(iid, 0) - plain) < 1e-3
+    assert abs(newey_west_t(iid, 10) - plain) / plain < 0.15
+    # a 20-day moving average of noise is autocorrelated: NW must shrink the naive t a lot
+    ma = torch.nn.functional.avg_pool1d(iid.view(1, 1, -1), 20, 1).view(-1)
+    naive = float(ma.mean() / (ma.std(unbiased=False) / ma.numel() ** 0.5))
+    assert newey_west_t(ma, 20) < 0.5 * naive
+
+
+def test_swap_needs_gain_keeps_objective_monotone(small_market, small_cfg):
+    from dataclasses import replace
+    cfg = replace(small_cfg, oof_folds=2, swap_needs_gain=True)
+    env, pool, vocab = _env(small_market, cfg)
+    rng = np.random.default_rng(17)
+    objs = []
+    for _ in range(120):
+        env.reset()
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(int(rng.choice(np.flatnonzero(env.action_masks()))))
+        if pool.size == pool.capacity:
+            objs.append(pool.obj)
+    assert len(objs) > 10 and all(b >= a - 1e-9 for a, b in zip(objs, objs[1:]))

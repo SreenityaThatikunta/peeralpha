@@ -10,11 +10,17 @@ every day and the members are combined linearly. ``weighting`` picks the weights
 
 Adding a candidate:
   1. invalid / constant / mostly-NaN                  -> penalty
-  2. near-duplicate of a member (|mutual IC| > thr)   -> penalty
-  3. otherwise tentatively add; if over capacity drop one member (possibly the newcomer):
+  2. IC sign unstable across train folds (optional)   -> penalty
+  3. near-duplicate of a member (|mutual IC| > thr)   -> penalty
+  4. otherwise tentatively add; if over capacity drop one member (possibly the newcomer):
      the smallest |ridge weight| for ``ridge``, else the member whose removal hurts the
      ensemble IC least.
 Reward = scale * (Delta ensemble IC + beta * novelty bonus) - gamma * length penalty.
+
+With ``oof_folds >= 2`` the ensemble IC in the reward is out-of-fold: the train slice is cut
+into contiguous folds (the last ``horizon`` days of each are purged), and each fold is scored
+with ridge weights fitted on the other folds. A member only earns reward if it helps on data
+the combiner did not see. The weights used at evaluation time are still fitted on all of train.
 """
 from __future__ import annotations
 
@@ -42,7 +48,7 @@ class Member:
 @dataclass
 class AddResult:
     reward: float
-    status: str                          # invalid | duplicate | rejected | accepted
+    status: str                          # invalid | unstable | duplicate | rejected | accepted
     ic: float = float("nan")
     max_mutual: float = float("nan")
     delta_obj: float = 0.0
@@ -60,10 +66,14 @@ class AlphaPool:
         yz = zscore_rows(self.y)
         self._ymask = torch.isfinite(yz).to(self.y.dtype)
         self._yz = torch.nan_to_num(yz, nan=0.0)
+        if cfg.oof_folds >= 2 and cfg.weighting != "ridge":
+            raise ValueError("oof_folds needs weighting: ridge")
+        self._M, self._fold_of = self._part_masks(self.hi - self.lo, cfg.oof_folds, market.horizon, market.device)
+        P = self._M.shape[1]
         self.members: List[Member] = []
         self.w = torch.zeros(0, device=market.device)     # current combination weights
-        self._G = torch.zeros(0, 0, device=market.device)  # member Gram matrix (ridge)
-        self._b = torch.zeros(0, device=market.device)     # member-target products (ridge)
+        self._G = torch.zeros(P, 0, 0, device=market.device)  # member Gram matrix per part (ridge)
+        self._b = torch.zeros(P, 0, device=market.device)     # member-target products per part (ridge)
         self.obj = 0.0                   # ensemble IC on train slice
         self.eval_count = 0
         self.n_accepted = 0
@@ -80,33 +90,71 @@ class AlphaPool:
     def weights(self) -> np.ndarray:
         return self.w.cpu().numpy()
 
+    @staticmethod
+    def _part_masks(T: int, folds: int, horizon: int, device):
+        """Day masks ``[T, P]``: column 0 is the whole train slice, then one column per OOF fold.
+        Fold ``f`` holds a contiguous block minus its last ``horizon`` days, so no fold's target
+        window overlaps another fold. ``fold_of[t]`` is the fold of day ``t`` (``folds`` if purged)."""
+        if folds < 2:
+            return torch.ones(T, 1, device=device), None
+        fold_of = torch.full((T,), folds, dtype=torch.long, device=device)
+        for f, idx in enumerate(torch.tensor_split(torch.arange(T, device=device), folds)):
+            fold_of[idx[: max(len(idx) - horizon, 0)]] = f
+        M = torch.zeros(T, 1 + folds, device=device)
+        M[:, 0] = 1.0
+        M[fold_of < folds, 1 + fold_of[fold_of < folds]] = 1.0
+        return M, fold_of
+
     def _ridge(self, G: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         k = G.shape[0]
         lam = self.cfg.ridge_lambda * float(G.diagonal().mean().clamp_min(1e-12))
         return torch.linalg.solve(G + lam * torch.eye(k, dtype=G.dtype, device=G.device), b)
 
     def _fit(self, ics: List[float], G: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        return self._ridge(G, b) if self.cfg.weighting == "ridge" else self._weights(ics)
+        """Weights fitted on the whole train slice (part 0 of ``G``/``b``)."""
+        return self._ridge(G[0], b[0]) if self.cfg.weighting == "ridge" else self._weights(ics)
 
-    def _stats(self, zf: torch.Tensor):
-        """Gram row of ``zf`` against the members, its own norm and its target product."""
+    def _stats(self, zf: torch.Tensor, members: Optional[List[Member]] = None):
+        """Per-part Gram row of ``zf`` against the members ``[P, k]``, its own norm ``[P]`` and
+        its target product ``[P]``."""
+        members = self.members if members is None else members
         zm = zf * self._ymask
-        row = torch.stack([(zm * m.z).sum() for m in self.members]) if self.members \
-            else torch.zeros(0, device=zf.device)
-        return row, (zm * zf).sum(), (zm * self._yz).sum()
+        if members:
+            row = torch.stack([(zm * m.z).sum(1) for m in members]) @ self._M        # [k, P]
+        else:
+            row = torch.zeros(0, self._M.shape[1], device=zf.device)
+        return row.T, (zm * zf).sum(1) @ self._M, (zm * self._yz).sum(1) @ self._M
+
+    @staticmethod
+    def _grow(G: torch.Tensor, b: torch.Tensor, row: torch.Tensor, own: torch.Tensor, bn: torch.Tensor):
+        """Append one member to per-part Gram ``[P, k, k]`` and target products ``[P, k]``."""
+        P, k = G.shape[0], G.shape[1]
+        G2 = torch.zeros(P, k + 1, k + 1, device=G.device)
+        G2[:, :k, :k], G2[:, k, :k], G2[:, :k, k], G2[:, k, k] = G, row, row, own
+        return G2, torch.cat([b, bn.view(P, 1)], dim=1)
 
     def _refresh(self) -> None:
         """Recompute Gram/target products and weights from scratch (used after load)."""
-        k = len(self.members)
-        self._G = torch.zeros(k, k, device=self.mkt.device)
-        self._b = torch.zeros(k, device=self.mkt.device)
+        P = self._M.shape[1]
+        G = torch.zeros(P, 0, 0, device=self.mkt.device)
+        b = torch.zeros(P, 0, device=self.mkt.device)
         for i, m in enumerate(self.members):
-            zm = m.z * self._ymask
-            self._b[i] = (zm * self._yz).sum()
-            for j in range(i + 1):
-                self._G[i, j] = self._G[j, i] = (zm * self.members[j].z).sum()
-        self.w = self._fit([m.ic for m in self.members], self._G, self._b) if k \
+            G, b = self._grow(G, b, *self._stats(m.z, self.members[:i]))
+        self._G, self._b = G, b
+        self.w = self._fit([m.ic for m in self.members], G, b) if self.members \
             else torch.zeros(0, device=self.mkt.device)
+
+    def _score(self, w: torch.Tensor, G: torch.Tensor, b: torch.Tensor, Z: torch.Tensor) -> float:
+        """Pool objective for members ``Z`` with full-train weights ``w`` (out-of-fold if enabled)."""
+        if self._fold_of is None:
+            return self._objective(torch.einsum("k,ktn->tn", w, Z))
+        F = self._M.shape[1] - 1
+        rest_G, rest_b = G[1:].sum(0), b[1:].sum(0)
+        Wf = torch.stack([self._ridge(rest_G - G[1 + f], rest_b - b[1 + f]) for f in range(F)])
+        Wf = torch.cat([Wf, torch.zeros(1, Wf.shape[1], device=Wf.device)])      # purged days -> 0
+        ens = torch.einsum("tk,ktn->tn", Wf[self._fold_of], Z)
+        v = nanmean(daily_ic(ens, self.y))
+        return 0.0 if v != v else v
 
     def ensemble(self) -> torch.Tensor:
         """Current ensemble on the train slice."""
@@ -126,6 +174,13 @@ class AlphaPool:
         return 0.0 if v != v else v
 
     # ------------------------------------------------------------------
+    def _stable(self, ic_days: torch.Tensor, ic: float) -> bool:
+        k = self.cfg.stable_folds
+        if k < 2:
+            return True
+        agree = sum(1 for c in torch.tensor_split(ic_days, k) if (m := nanmean(c)) == m and m * ic > 0)
+        return agree >= int(np.ceil(self.cfg.stable_min_frac * k - 1e-9))
+
     def _candidate(self, node: Node):
         try:
             a = evaluate(node, self.mkt, self.hi)
@@ -136,10 +191,11 @@ class AlphaPool:
         z = zscore_rows(a[self.lo:self.hi])
         if float(torch.isfinite(z).float().mean()) < 0.3:
             return None
-        ic = nanmean(daily_ic(z, self.y))
+        ic_days = daily_ic(z, self.y)
+        ic = nanmean(ic_days)
         if ic != ic:
             return None
-        return z, ic
+        return z, ic, ic_days
 
     def try_add(self, node: Node, n_tokens: int, budget: int) -> AddResult:
         cfg = self.cfg
@@ -147,7 +203,9 @@ class AlphaPool:
         cand = self._candidate(node)
         if cand is None:
             return AddResult(-cfg.invalid_penalty, "invalid")
-        z, ic = cand
+        z, ic, ic_days = cand
+        if not self._stable(ic_days, ic):
+            return AddResult(-cfg.unstable_penalty, "unstable", ic)
         zf = torch.nan_to_num(z, nan=0.0)
 
         mutual = [abs(nanmean(daily_ic(zf, m.z))) for m in self.members]
@@ -159,17 +217,14 @@ class AlphaPool:
         ics = [m.ic for m in self.members] + [ic]
         Z = torch.stack([m.z for m in self.members] + [zf])
         K = len(ics)
-        row, own, bn = self._stats(zf)
-        G = torch.zeros(K, K, device=zf.device)
-        G[:-1, :-1], G[-1, :-1], G[:-1, -1], G[-1, -1] = self._G, row, row, own
-        b = torch.cat([self._b, bn.view(1)])
+        G, b = self._grow(self._G, self._b, *self._stats(zf))
         w = self._fit(ics, G, b)
         ens = torch.einsum("k,ktn->tn", w, Z)
 
         drop: Optional[int] = None
         w_new = w
         if K <= self.capacity:
-            obj_new = self._objective(ens)
+            obj_new = self._score(w, G, b, Z)
             retained = True
         elif cfg.weighting == "ridge":
             j = int(w.abs().argmin())
@@ -177,9 +232,12 @@ class AlphaPool:
                 obj_new, retained = self.obj, False
             else:
                 keep = [i for i in range(K) if i != j]
-                w_new = self._fit([ics[i] for i in keep], G[keep][:, keep], b[keep])
-                obj_new = self._objective(torch.einsum("k,ktn->tn", w_new, Z[keep]))
+                Gk, bk = G[:, keep][:, :, keep], b[:, keep]
+                w_new = self._fit([ics[i] for i in keep], Gk, bk)
+                obj_new = self._score(w_new, Gk, bk, Z[keep])
                 retained, drop = True, j
+                if cfg.swap_needs_gain and obj_new <= self.obj:   # a swap that lowers the objective is refused
+                    obj_new, retained, drop, w_new = self.obj, False, None, w
         else:
             best_obj, best_j = -1e9, -1
             for j in range(K):
@@ -198,7 +256,7 @@ class AlphaPool:
         if cfg.dense_reward and not retained:
             # saturated pool: still tell the agent how much the rejected candidate would have changed the
             # ensemble (<= 0, graded) instead of a flat zero
-            r_delta = self._objective(ens) - self.obj
+            r_delta = self._score(w, G, b, Z) - self.obj
         novelty = cfg.beta_div * (1.0 - max_mut) * abs(ic) if (retained or cfg.dense_reward) else 0.0
         length_pen = cfg.gamma_len * n_tokens / max(budget, 1)
         reward = cfg.reward_scale * (r_delta + novelty) - length_pen
@@ -210,7 +268,7 @@ class AlphaPool:
                 keep.remove(drop)
                 # keep the newcomer last so ``set_last_keys`` still addresses it
                 self.members = [self.members[i] for i in keep]
-            self._G, self._b, self.w = G[keep][:, keep], b[keep], w_new
+            self._G, self._b, self.w = G[:, keep][:, :, keep], b[:, keep], w_new
             self.obj = obj_new
             self.n_accepted += 1
         parts = {"delta": cfg.reward_scale * r_delta, "novelty": cfg.reward_scale * novelty, "length": -length_pen}
@@ -272,9 +330,9 @@ class AlphaPool:
             cand = pool._candidate(node)
             if cand is None:
                 continue
-            z, ic = cand
+            z, ic, _ = cand
             pool.members.append(Member(node, item["keys"], ic, torch.nan_to_num(z, nan=0.0)))
         pool._refresh()
         if pool.members:
-            pool.obj = pool._objective(pool.ensemble())
+            pool.obj = pool._score(pool.w, pool._G, pool._b, torch.stack([m.z for m in pool.members]))
         return pool
