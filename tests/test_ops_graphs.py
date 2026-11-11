@@ -135,3 +135,14 @@ def test_small_sectors_are_merged(tmp_path):
     m = Market(path, 5, splits, ["sector"], graph_k=5, device="cpu", min_sector_size=3)
     assert np.bincount(m.sector_ids).max() > 0
     assert m.sector_ids[0] != 7 and (np.bincount(m.sector_ids)[np.bincount(m.sector_ids) > 0] >= 3).all()
+
+
+def test_derived_return_features(small_market):
+    from peeralpha.ops import FEATURES
+    f = small_market.feat
+    close, vwap = f[FEATURES.index("close")], f[FEATURES.index("vwap")]
+    ret20 = f[FEATURES.index("ret20")]
+    assert torch.allclose(ret20[25:], close[25:] / close[5:-20] - 1.0, equal_nan=True)
+    assert torch.isnan(ret20[:20]).all()
+    assert torch.allclose(f[FEATURES.index("cvwap")], close / vwap - 1.0, equal_nan=True)
+    assert bool((f[FEATURES.index("range")][torch.isfinite(f[FEATURES.index("range")])] >= -1e-6).all())

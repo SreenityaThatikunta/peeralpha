@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from .ops import CONSTANTS, FEATURES, REGISTRY, WINDOWS
+from .ops import CONSTANTS, DEFAULT_FEATURES, FEATURES, REGISTRY, WINDOWS
 
 SEP = "<SEP>"
 
@@ -18,10 +18,17 @@ class Tok:
 
 
 class Vocab:
-    """Ordered token table. Graph operators/tokens exist only if graphs are enabled."""
+    """Ordered token table. Graph operators/tokens exist only if graphs are enabled.
 
-    def __init__(self, graphs: List[str]):
+    ``features`` picks the leaf features (default: the v2 set, so old runs keep their token ids).
+    """
+
+    def __init__(self, graphs: List[str], features: Optional[List[str]] = None):
         self.graphs = list(graphs)
+        chosen = set(features or DEFAULT_FEATURES)
+        unknown = chosen - set(FEATURES)
+        if unknown:
+            raise KeyError(f"Unknown features: {sorted(unknown)}")
         toks: List[Tok] = []
 
         def add(kind: str, name: str, value: float = 0.0) -> None:
@@ -32,7 +39,8 @@ class Vocab:
                 continue
             add(spec.kind, spec.name)
         for f in FEATURES:
-            add("feat", f)
+            if f in chosen:
+                add("feat", f)
         for c in CONSTANTS:
             add("const", f"{c:g}", c)
         for w in WINDOWS:

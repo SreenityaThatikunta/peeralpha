@@ -97,3 +97,15 @@ def test_sep_masked_before_min_len():
             if len(b) >= 15:
                 break
         assert len(b) >= 3 and b.is_complete()
+
+
+def test_vocab_feature_subset():
+    import pytest
+    from peeralpha.ops import DEFAULT_FEATURES, SCALE_FREE_FEATURES
+    full = Vocab(["sector"])
+    assert [t.name for t in full.tokens if t.kind == "feat"] == DEFAULT_FEATURES
+    sf = Vocab(["sector"], SCALE_FREE_FEATURES)
+    names = [t.name for t in sf.tokens if t.kind == "feat"]
+    assert names == SCALE_FREE_FEATURES and "close" not in names and "ret20" in names
+    with pytest.raises(KeyError):
+        Vocab([], ["nope"])

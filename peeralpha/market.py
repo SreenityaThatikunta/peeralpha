@@ -21,7 +21,7 @@ def resolve_device(name: str) -> torch.device:
 class Market:
     """All data the environment needs, held as tensors on ``device``.
 
-    feat   : [F, T, N]  (open, high, low, close, volume, vwap, ret, ret5, vrel)
+    feat   : [F, T, N]  (open, high, low, close, volume, vwap, ret, ret5, vrel, ret20, cvwap, range)
     ret    : [T, N]     close-to-close daily return (day t vs t-1)
     target : [T, N]     forward return close[t+H]/close[t]-1  (NaN near the end)
     """
@@ -61,9 +61,14 @@ class Market:
         self.ret = ret
         ret5 = torch.full_like(close, float("nan"))
         ret5[5:] = close[5:] / close[:-5] - 1.0
+        ret20 = torch.full_like(close, float("nan"))
+        ret20[20:] = close[20:] / close[:-20] - 1.0
         vmean = op_mean(volume, 20)
         vrel = volume / torch.where(vmean > 0, vmean, torch.full_like(vmean, float("nan")))
-        derived = {"ret": ret, "ret5": ret5, "vrel": vrel}
+        pos = lambda x: torch.where(x > 0, x, torch.full_like(x, float("nan")))
+        cvwap = close / pos(base[BASE_FEATURES.index("vwap")]) - 1.0
+        rng = base[BASE_FEATURES.index("high")] / pos(base[BASE_FEATURES.index("low")]) - 1.0
+        derived = {"ret": ret, "ret5": ret5, "vrel": vrel, "ret20": ret20, "cvwap": cvwap, "range": rng}
         self.feat = torch.cat([base, torch.stack([derived[f] for f in FEATURES[len(BASE_FEATURES):]])])
         target = torch.full_like(close, float("nan"))
         target[:-horizon] = close[horizon:] / close[:-horizon] - 1.0

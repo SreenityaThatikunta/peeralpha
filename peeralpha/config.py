@@ -40,6 +40,7 @@ class Config:
     # ---- formula language / environment ------------------------------
     max_len: int = 15
     min_tokens: int = 3                 # <SEP> masked before this many tokens (no bare-feature alphas)
+    features: List[str] = field(default_factory=list)   # leaf features; empty = v2 set (prices + ret, ret5, vrel)
     curriculum: List[List[Any]] = field(
         default_factory=lambda: [[0, 9, True], [2000, 12, True], [6000, 15, True]]
     )  # rows: [episode_threshold, max_len, graph_ops_allowed]
@@ -58,6 +59,11 @@ class Config:
     dense_reward: bool = False          # rejected candidates still get graded reward (fixes frozen-pool zero signal)
     robust_folds: int = 0               # >=2: reward uses mean(fold IC) - lambda*std(fold IC) over train folds
     robust_lambda: float = 1.0          # penalty on IC instability across train sub-periods
+    oof_folds: int = 0                  # >=2: reward IC is out-of-fold (ridge fit without the fold it is scored on)
+    stable_folds: int = 0               # >=2: candidate IC must keep its sign in most of these train folds
+    stable_min_frac: float = 0.75       # share of stable_folds that must agree with the overall IC sign
+    unstable_penalty: float = 0.05
+    swap_needs_gain: bool = False       # full ridge pool: only swap a member out if the objective improves
 
     # ---- policy / PPO ------------------------------------------------
     policy: str = "gat"                 # "gat" | "lstm"

@@ -276,8 +276,11 @@ def _specs() -> List[OpSpec]:
 REGISTRY: Dict[str, OpSpec] = {s.name: s for s in _specs()}
 
 BASE_FEATURES: List[str] = ["open", "high", "low", "close", "volume", "vwap"]   # stored in the .npz
-# derived, scale-free: 1-day return, 5-day return, volume relative to its 20-day mean
-DERIVED_FEATURES: List[str] = ["ret", "ret5", "vrel"]
+# derived, scale-free: 1/5/20-day return, volume relative to its 20-day mean, close vs vwap, day range
+DERIVED_FEATURES: List[str] = ["ret", "ret5", "vrel", "ret20", "cvwap", "range"]
 FEATURES: List[str] = BASE_FEATURES + DERIVED_FEATURES
+# leaf features of the formula language unless ``features`` is set in the config (the v2 vocabulary)
+DEFAULT_FEATURES: List[str] = BASE_FEATURES + ["ret", "ret5", "vrel"]
+SCALE_FREE_FEATURES: List[str] = DERIVED_FEATURES
 WINDOWS: List[int] = [1, 5, 10, 20, 40]
 CONSTANTS: List[float] = [-5.0, -2.0, -1.0, -0.5, -0.01, 0.01, 0.5, 1.0, 2.0, 5.0]
