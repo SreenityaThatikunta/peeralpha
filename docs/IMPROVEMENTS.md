@@ -26,6 +26,36 @@ existing graph vs no-graph tables therefore say nothing about graph operators ye
 | 7 | Point-in-time universe (survivorship) | todo |
 | 8 | Cache formula evaluations; regenerate `reports/SUMMARY.md` | todo |
 
+## v3: generalization (Nov 2026)
+
+Analysis of the v2 NSE walk-forward: https://claude.ai/artifact/MPLp5q2KuRipi8RHog4vaR.
+Members barely keep their sign out of sample, ridge over 20 of them inflates train IC to 0.12-0.16,
+80-94% of members use raw price levels, and validation IC does not predict test IC.
+
+| # | Change | Status |
+|---|---|---|
+| 1 | `evaluate.py` scores the final pool (main table) and the best-valid snapshot | done |
+| 1 | Newey-West t of daily test IC (`NW t`), seed-ensemble table, `--hand` sector baseline row | done |
+| 1 | `walk_forward.py --valid_years 2` | done |
+| 2 | Out-of-fold reward (`oof_folds`): each train fold scored with ridge fitted on the others | done |
+| 2 | Sign-stability gate (`stable_folds`, `stable_min_frac`, `unstable_penalty`) | done |
+| 2 | `swap_needs_gain`: a full pool only swaps a member out if the (out-of-fold) objective improves | done |
+| 2 | `features` option; new scale-free features `$ret20`, `$cvwap` (close/vwap-1), `$range` (high/low-1) | done |
+| 2 | `configs/v3_*.yaml`: H=5, scale-free features, pool 10, `ridge_lambda` 1, OOF 4 folds, gate 3/4, `swap_needs_gain` | done |
+
+Re-scoring the v2 runs (`reports/v2nse_wf_rescore/`), final pool, mean test IC over 3 windows x 3 seeds:
+graph_all 0.038 (NW t 2.0), random_graph 0.032, random_nograph 0.029, nograph 0.021, sector 0.017,
+hand sector baseline 0.033. Averaging the 3 seeds' signals lifts graph_all to 0.047 (positive in every window).
+
+```bash
+python scripts/walk_forward.py --data data/nse100.npz --tag v3nse --seeds 0 1 2 --valid_years 2 \
+  --methods v3_nograph v3_sector v3_graph_all v3_random_graph --steps 300000 \
+  --baseline v3_nograph --hand --jobs 5 --threads 1
+```
+
+Pass gate: v3_graph_all beats `hand_sector` on average, beats v3_nograph with t > 2 and
+v3_random_graph with t > 1.5, under both snapshot rules.
+
 Old run configs keep their behaviour: `Config.from_json` fills `gop_zscore`/`graph_residual`
 with the values those runs used, and their saved `weighting`/penalties are explicit.
 
