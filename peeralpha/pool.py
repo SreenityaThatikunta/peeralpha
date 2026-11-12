@@ -44,6 +44,9 @@ from .vocab import Vocab
 # within-sector 5-day reversal, the two halves of the hand-made baseline in evaluate.py
 PRIORS: Dict[str, List[List[str]]] = {
     "hand_sector": [["feat:ret20", "graph:sector", "NbrMean"], ["feat:ret5", "graph:sector", "NbrRel"]],
+    # the same plus 12-1 month own momentum (needs ``mom12_1`` in ``features``)
+    "hand_sector_mom": [["feat:ret20", "graph:sector", "NbrMean"], ["feat:ret5", "graph:sector", "NbrRel"],
+                        ["feat:mom12_1"]],
 }
 
 

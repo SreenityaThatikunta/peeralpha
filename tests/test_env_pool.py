@@ -305,3 +305,10 @@ def test_prior_members_are_fixed(small_market, small_cfg, tmp_path):
     # a near-copy of a prior member is a duplicate
     res = pool.try_add(build_from_keys(vocab, ["feat:ret20", "graph:sector", "NbrMean"]), 3, 15)
     assert res.status == "duplicate"
+
+
+def test_hand_sector_mom_prior(small_market, small_cfg):
+    from dataclasses import replace
+    cfg = replace(small_cfg, prior="hand_sector_mom", features=["ret", "ret5", "ret20", "mom12_1"])
+    pool = AlphaPool(small_market, cfg, Vocab(cfg.graphs, cfg.features))
+    assert pool.n_fixed == 3 and [m.keys[-1] for m in pool.members] == ["NbrMean", "NbrRel", "feat:mom12_1"]
