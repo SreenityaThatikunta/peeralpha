@@ -4,6 +4,7 @@ data/*
 
 # experiment outputs
 runs/
+kaggle_out/
 logs/
 *.zip
 *.pt
