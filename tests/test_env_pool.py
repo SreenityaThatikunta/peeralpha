@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from peeralpha.env import AlphaEnv
@@ -260,3 +261,47 @@ def test_swap_needs_gain_keeps_objective_monotone(small_market, small_cfg):
         if pool.size == pool.capacity:
             objs.append(pool.obj)
     assert len(objs) > 10 and all(b >= a - 1e-9 for a, b in zip(objs, objs[1:]))
+
+
+def test_long_horizon_features(small_market):
+    from peeralpha.ops import FEATURES
+    close = small_market.feat[FEATURES.index("close")]
+    mom = small_market.feat[FEATURES.index("mom12_1")]
+    t = 300
+    expect = close[t - 20] / close[t - 250] - 1.0
+    assert torch.allclose(mom[t], expect, atol=1e-5, equal_nan=True)
+    assert torch.isnan(mom[:250]).all()
+    vol = small_market.feat[FEATURES.index("vol20")]
+    assert torch.isfinite(vol[30:]).float().mean() > 0.9
+
+
+def test_vocab_windows_and_ops():
+    v = Vocab(["sector"], ["ret", "mom12_1"], windows=[5, 120], ops=["Add", "Mean", "NbrMean"])
+    assert {t.name for t in v.tokens if t.kind == "win"} == {"5", "120"}
+    assert {t.name for t in v.tokens if t.kind in ("unary", "binary", "rolling", "pair", "gop")} == {"Add", "Mean", "NbrMean"}
+    with pytest.raises(KeyError):
+        Vocab([], ops=["Nope"])
+
+
+def test_prior_members_are_fixed(small_market, small_cfg, tmp_path):
+    from dataclasses import replace
+    from peeralpha.grammar import build_from_keys
+    cfg = replace(small_cfg, prior="hand_sector", pool_capacity=2, features=["ret", "ret5", "ret20", "vrel"])
+    vocab = Vocab(cfg.graphs, cfg.features)
+    pool = AlphaPool(small_market, cfg, vocab)
+    assert pool.n_fixed == 2 and pool.size == 2 and pool.obj != 0.0
+    prior = [str(m.node) for m in pool.members]
+    for keys in (["feat:ret", "win:20", "Mean"], ["feat:vrel", "win:5", "Max"], ["feat:ret5", "win:10", "Std"],
+                 ["feat:ret20", "CsRank"], ["feat:ret", "win:5", "Sum"], ["feat:vrel", "win:20", "Mean"]):
+        if pool.try_add(build_from_keys(vocab, keys), 3, 15).status == "accepted":
+            pool.set_last_keys(keys)
+    assert [str(m.node) for m in pool.members[:2]] == prior          # never dropped
+    assert pool.size <= cfg.pool_capacity + 2
+    p = str(tmp_path / "pool.json")
+    pool.save(p)
+    loaded = AlphaPool.load(small_market, cfg, vocab, p)
+    assert loaded.size == pool.size and loaded.n_fixed == 2
+    assert abs(loaded.obj - pool.obj) < 1e-4
+    # a near-copy of a prior member is a duplicate
+    res = pool.try_add(build_from_keys(vocab, ["feat:ret20", "graph:sector", "NbrMean"]), 3, 15)
+    assert res.status == "duplicate"

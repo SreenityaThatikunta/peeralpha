@@ -17,6 +17,10 @@ Adding a candidate:
      ensemble IC least.
 Reward = scale * (Delta ensemble IC + beta * novelty bonus) - gamma * length penalty.
 
+``prior`` names a set of fixed members (``PRIORS``) the pool starts with. They count on top of
+``capacity``, are never dropped, and are in every refit, so the agent is only paid for what it adds
+beyond them (and near-copies of them are rejected as duplicates).
+
 With ``oof_folds >= 2`` the ensemble IC in the reward is out-of-fold: the train slice is cut
 into contiguous folds (the last ``horizon`` days of each are purged), and each fold is scored
 with ridge weights fitted on the other folds. A member only earns reward if it helps on data
@@ -35,6 +39,12 @@ from .expr import Node, evaluate
 from .grammar import build_from_keys
 from .metrics import daily_ic, daily_rank_ic, nanmean, summarize, zscore_rows
 from .vocab import Vocab
+
+# fixed starting members by name (postfix token keys); "hand_sector" = sector momentum and
+# within-sector 5-day reversal, the two halves of the hand-made baseline in evaluate.py
+PRIORS: Dict[str, List[List[str]]] = {
+    "hand_sector": [["feat:ret20", "graph:sector", "NbrMean"], ["feat:ret5", "graph:sector", "NbrRel"]],
+}
 
 
 @dataclass
@@ -77,6 +87,25 @@ class AlphaPool:
         self.obj = 0.0                   # ensemble IC on train slice
         self.eval_count = 0
         self.n_accepted = 0
+        self.n_fixed = 0
+        if getattr(cfg, "prior", ""):
+            self._add_prior(cfg.prior)
+
+    def _add_prior(self, name: str) -> None:
+        if name not in PRIORS:
+            raise ValueError(f"Unknown prior: {name} (known: {sorted(PRIORS)})")
+        for keys in PRIORS[name]:
+            node = build_from_keys(self.vocab, keys)
+            cand = self._candidate(node)
+            if cand is None:
+                raise ValueError(f"prior member {keys} does not evaluate on this market")
+            z, ic, _ = cand
+            zf = torch.nan_to_num(z, nan=0.0)
+            self._G, self._b = self._grow(self._G, self._b, *self._stats(zf))
+            self.members.append(Member(node, list(keys), ic, zf))
+        self.n_fixed = len(self.members)
+        self.w = self._fit([m.ic for m in self.members], self._G, self._b)
+        self.obj = self._score(self.w, self._G, self._b, torch.stack([m.z for m in self.members]))
 
     # ------------------------------------------------------------------
     @property
@@ -223,11 +252,12 @@ class AlphaPool:
 
         drop: Optional[int] = None
         w_new = w
-        if K <= self.capacity:
+        nf = self.n_fixed
+        if K <= self.capacity + nf:
             obj_new = self._score(w, G, b, Z)
             retained = True
         elif cfg.weighting == "ridge":
-            j = int(w.abs().argmin())
+            j = nf + int(w[nf:].abs().argmin())
             if j == K - 1:                   # newcomer gets the smallest weight -> pool unchanged
                 obj_new, retained = self.obj, False
             else:
@@ -240,7 +270,7 @@ class AlphaPool:
                     obj_new, retained, drop, w_new = self.obj, False, None, w
         else:
             best_obj, best_j = -1e9, -1
-            for j in range(K):
+            for j in range(nf, K):
                 o = self._objective(ens - w[j] * Z[j])
                 if o > best_obj:
                     best_obj, best_j = o, j
@@ -310,8 +340,9 @@ class AlphaPool:
             "capacity": self.capacity,
             "weighting": self.cfg.weighting,
             "members": [
-                {"formula": str(m.node), "keys": m.keys, "train_ic": m.ic, "weight": float(w)}
-                for m, w in zip(self.members, self.weights())
+                {"formula": str(m.node), "keys": m.keys, "train_ic": m.ic, "weight": float(w),
+                 "fixed": i < self.n_fixed}
+                for i, (m, w) in enumerate(zip(self.members, self.weights()))
             ],
         }
 
@@ -324,8 +355,10 @@ class AlphaPool:
         """Rebuild a pool from JSON; member ICs are recomputed on the train slice."""
         with open(path) as f:
             blob = json.load(f)
-        pool = cls(market, cfg, vocab)
+        pool = cls(market, cfg, vocab)          # re-creates any prior members itself
         for item in blob["members"]:
+            if item.get("fixed"):
+                continue
             node = build_from_keys(vocab, item["keys"])
             cand = pool._candidate(node)
             if cand is None:
