@@ -69,6 +69,15 @@ UNIVERSE: Dict[str, str] = {
 }
 
 
+def load_universe_csv(path: str) -> Dict[str, str]:
+    """``{symbol: industry}`` from an NSE index constituent CSV (columns ``Symbol`` and ``Industry``)."""
+    df = pd.read_csv(path)
+    df.columns = [c.strip() for c in df.columns]
+    if "Series" in df.columns:
+        df = df[df["Series"].astype(str).str.strip() == "EQ"]
+    return {str(r["Symbol"]).strip(): str(r["Industry"]).strip() for _, r in df.iterrows()}
+
+
 def download_one(sym: str, start: str, end: str, cache: str, tries: int = 3) -> Optional[pd.DataFrame]:
     import yfinance as yf
 
@@ -104,11 +113,15 @@ def main() -> None:
     ap.add_argument("--start", default="2011-06-01")      # a little before train start so rolling ops warm up
     ap.add_argument("--end", default="2024-12-31")
     ap.add_argument("--limit", type=int, default=None, help="only first N stocks (quick test)")
+    ap.add_argument("--universe_csv", default=None,
+                    help="NSE index constituent CSV (e.g. ind_nifty200list.csv: Symbol + Industry columns); "
+                         "replaces the built-in list and its sectors with NSE's industry labels")
     ap.add_argument("--min_coverage", type=float, default=0.9,
                     help="drop stocks with fewer valid days than this fraction of the longest history")
     args = ap.parse_args()
 
-    syms: List[str] = list(UNIVERSE)[: args.limit] if args.limit else list(UNIVERSE)
+    universe = load_universe_csv(args.universe_csv) if args.universe_csv else UNIVERSE
+    syms: List[str] = list(universe)[: args.limit] if args.limit else list(universe)
     cache = os.path.join(os.path.dirname(os.path.abspath(args.out)), "cache", "nse")
     os.makedirs(cache, exist_ok=True)
     frames: Dict[str, pd.DataFrame] = {}
@@ -128,7 +141,7 @@ def main() -> None:
     if dropped:
         print(f"[nse] dropped for short history (<{args.min_coverage:.0%}): {dropped}", flush=True)
 
-    sectors = {s: UNIVERSE[s] for s in frames}
+    sectors = {s: universe[s] for s in frames}
     counts = pd.Series(sectors).value_counts()
     print(f"[nse] {len(frames)} stocks; sector sizes:\n{counts.to_string()}", flush=True)
     assemble(frames, sectors, args.out)
