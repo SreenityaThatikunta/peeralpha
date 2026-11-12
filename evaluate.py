@@ -123,6 +123,7 @@ def evaluate_run(run_dir: str, market_cache: Dict, snapshot: str = "final") -> D
         json.dump({k: v for k, v in res.items()}, f, indent=2)
     res["_port"], res["_bench"], res["_corr"] = bt["port"], bt["bench"], corr
     res["_members"] = members
+    res["_prior"] = getattr(cfg, "prior", "")
     res["_sig"], res["_key"] = sig, _market_key(cfg)
     return res
 
@@ -217,6 +218,53 @@ def union_gate_table(groups: "OrderedDict[str, List[Dict]]", cache: Dict) -> str
     return "\n".join(lines)
 
 
+BLEND_GRID = [0.0, 0.25, 0.5, 1.0, 2.0]
+
+
+def prior_blend_table(groups: "OrderedDict[str, List[Dict]]", cache: Dict) -> str:
+    """For methods trained with a ``prior``: z(fixed hand baseline of that prior) + lam * z(seed-averaged
+    pool signal), with ``lam`` picked per window on validation IC only. Shows whether the learned pool
+    adds anything to the unlearned baseline it started from."""
+    rows = []
+    windows = sorted({r["window"] for rs in groups.values() for r in rs})
+    for name, rs in groups.items():
+        prior = next((r.get("_prior") for r in rs if r.get("_prior")), "")
+        base = {"hand_sector": "hand_sector", "hand_sector_mom": "hand_sector_mom"}.get(prior)
+        if not base:
+            continue
+        cells, vals, bvals = [], [], []
+        for w in windows:
+            sub = [r for r in rs if r["window"] == w and r.get("_sig") is not None]
+            if not sub:
+                cells.append("")
+                continue
+            market = cache[sub[0]["_key"]]
+            vocab = Vocab(["sector"], FEATURES)
+            hi = market.ic_slice("test")[1]
+            H = sum(sgn * torch.nan_to_num(zscore_rows(evaluate(build_from_keys(vocab, keys), market, hi)), nan=0.0)
+                    for sgn, keys in HAND_BASELINES[base])
+            H = torch.nan_to_num(zscore_rows(H), nan=0.0)
+            P = torch.stack([torch.nan_to_num(zscore_rows(r["_sig"][:hi]), nan=0.0) for r in sub]).mean(0)
+            P = torch.nan_to_num(zscore_rows(P), nan=0.0)
+
+            def score(sig, split):
+                a, b = market.ic_slice(split)
+                return nanmean(daily_ic(sig[a:b], market.target[a:b]))
+            lam = max(BLEND_GRID, key=lambda l: score(H + l * P, "valid"))
+            v, b = score(H + lam * P, "test"), score(H, "test")
+            vals.append(v)
+            bvals.append(b)
+            cells.append(f"{v:+.4f} (lam {lam:g})")
+        if vals:
+            rows.append(f"| {name} | {base} | " + " | ".join(cells) + f" | {np.mean(vals):+.4f} | {np.mean(bvals):+.4f} |")
+    if not rows:
+        return ""
+    return "\n".join(["Prior blend: test IC of z(prior baseline) + lam * z(seed-averaged pool), lam picked on valid "
+                      f"from {BLEND_GRID}", "",
+                      "| Method | baseline | " + " | ".join(w or "all" for w in windows) + " | mean | baseline mean |",
+                      "|---|---|" + "|".join("---" for _ in windows) + "|---|---|", *rows])
+
+
 def _window_and_method(name: str):
     """``v2nse_w1_v2_graph_all`` -> (``w1``, ``v2_graph_all``); names without ``_w<k>_`` keep the tag."""
     parts = name.split("_")
@@ -273,6 +321,9 @@ def _report(results: List[Dict], key: str, baseline: str, cache: Dict) -> Tuple[
             if hname in groups and base != hname:
                 table += "\n\n" + paired_table(groups, hname)
     table += "\n\n" + seed_ensemble_table(groups, cache) + "\n\n" + union_gate_table(groups, cache)
+    blend = prior_blend_table(groups, cache)
+    if blend:
+        table += "\n\n" + blend
     return table, groups
 
 
