@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from .graphs import NeighborGraph, build_graphs
-from .ops import BASE_FEATURES, FEATURES, op_mean
+from .ops import BASE_FEATURES, FEATURES, op_mean, op_std
 
 
 def resolve_device(name: str) -> torch.device:
@@ -21,7 +21,8 @@ def resolve_device(name: str) -> torch.device:
 class Market:
     """All data the environment needs, held as tensors on ``device``.
 
-    feat   : [F, T, N]  (open, high, low, close, volume, vwap, ret, ret5, vrel, ret20, cvwap, range)
+    feat   : [F, T, N]  (open, high, low, close, volume, vwap, ret, ret5, vrel, ret20, cvwap, range,
+                         ret60, ret120, mom12_1, vol20)
     ret    : [T, N]     close-to-close daily return (day t vs t-1)
     target : [T, N]     forward return close[t+H]/close[t]-1  (NaN near the end)
     """
@@ -61,14 +62,19 @@ class Market:
         self.ret = ret
         ret5 = torch.full_like(close, float("nan"))
         ret5[5:] = close[5:] / close[:-5] - 1.0
-        ret20 = torch.full_like(close, float("nan"))
-        ret20[20:] = close[20:] / close[:-20] - 1.0
+        def back(a: int, b: int = 0) -> torch.Tensor:      # return from day t-a to day t-b
+            out = torch.full_like(close, float("nan"))
+            out[a:] = close[a - b:close.shape[0] - b] / close[:-a] - 1.0
+            return out
+
+        ret20 = back(20)
         vmean = op_mean(volume, 20)
         vrel = volume / torch.where(vmean > 0, vmean, torch.full_like(vmean, float("nan")))
         pos = lambda x: torch.where(x > 0, x, torch.full_like(x, float("nan")))
         cvwap = close / pos(base[BASE_FEATURES.index("vwap")]) - 1.0
         rng = base[BASE_FEATURES.index("high")] / pos(base[BASE_FEATURES.index("low")]) - 1.0
-        derived = {"ret": ret, "ret5": ret5, "vrel": vrel, "ret20": ret20, "cvwap": cvwap, "range": rng}
+        derived = {"ret": ret, "ret5": ret5, "vrel": vrel, "ret20": ret20, "cvwap": cvwap, "range": rng,
+                   "ret60": back(60), "ret120": back(120), "mom12_1": back(250, 20), "vol20": op_std(ret, 20)}
         self.feat = torch.cat([base, torch.stack([derived[f] for f in FEATURES[len(BASE_FEATURES):]])])
         target = torch.full_like(close, float("nan"))
         target[:-horizon] = close[horizon:] / close[:-horizon] - 1.0

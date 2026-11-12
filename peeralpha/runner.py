@@ -46,7 +46,7 @@ def build_market(cfg: Config) -> Market:
 
 def build_stack(cfg: Config, market: Optional[Market] = None) -> Tuple[Market, Vocab, AlphaPool, AlphaEnv]:
     market = market or build_market(cfg)
-    vocab = Vocab(cfg.graphs, cfg.features)
+    vocab = Vocab.from_config(cfg)
     pool = AlphaPool(market, cfg, vocab)
     env = AlphaEnv(market, pool, vocab, cfg)
     return market, vocab, pool, env

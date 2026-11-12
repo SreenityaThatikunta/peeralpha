@@ -41,6 +41,8 @@ class Config:
     max_len: int = 15
     min_tokens: int = 3                 # <SEP> masked before this many tokens (no bare-feature alphas)
     features: List[str] = field(default_factory=list)   # leaf features; empty = v2 set (prices + ret, ret5, vrel)
+    windows: List[int] = field(default_factory=list)    # rolling windows; empty = ops.WINDOWS
+    ops: List[str] = field(default_factory=list)        # allowed operators; empty = all
     curriculum: List[List[Any]] = field(
         default_factory=lambda: [[0, 9, True], [2000, 12, True], [6000, 15, True]]
     )  # rows: [episode_threshold, max_len, graph_ops_allowed]
@@ -64,6 +66,7 @@ class Config:
     stable_min_frac: float = 0.75       # share of stable_folds that must agree with the overall IC sign
     unstable_penalty: float = 0.05
     swap_needs_gain: bool = False       # full ridge pool: only swap a member out if the objective improves
+    prior: str = ""                     # name in pool.PRIORS: fixed members the pool starts with (never dropped)
 
     # ---- policy / PPO ------------------------------------------------
     policy: str = "gat"                 # "gat" | "lstm"

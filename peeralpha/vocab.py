@@ -20,22 +20,28 @@ class Tok:
 class Vocab:
     """Ordered token table. Graph operators/tokens exist only if graphs are enabled.
 
-    ``features`` picks the leaf features (default: the v2 set, so old runs keep their token ids).
+    ``features`` picks the leaf features (default: the v2 set, so old runs keep their token ids),
+    ``windows`` the rolling windows (default ``WINDOWS``) and ``ops`` the operators (default: all).
     """
 
-    def __init__(self, graphs: List[str], features: Optional[List[str]] = None):
+    def __init__(self, graphs: List[str], features: Optional[List[str]] = None,
+                 windows: Optional[List[int]] = None, ops: Optional[List[str]] = None):
         self.graphs = list(graphs)
         chosen = set(features or DEFAULT_FEATURES)
         unknown = chosen - set(FEATURES)
         if unknown:
             raise KeyError(f"Unknown features: {sorted(unknown)}")
+        allowed = set(ops or REGISTRY)
+        unknown = allowed - set(REGISTRY)
+        if unknown:
+            raise KeyError(f"Unknown ops: {sorted(unknown)}")
         toks: List[Tok] = []
 
         def add(kind: str, name: str, value: float = 0.0) -> None:
             toks.append(Tok(len(toks), kind, name, value))
 
         for spec in REGISTRY.values():
-            if spec.kind == "gop" and not graphs:
+            if (spec.kind == "gop" and not graphs) or spec.name not in allowed:
                 continue
             add(spec.kind, spec.name)
         for f in FEATURES:
@@ -43,7 +49,7 @@ class Vocab:
                 add("feat", f)
         for c in CONSTANTS:
             add("const", f"{c:g}", c)
-        for w in WINDOWS:
+        for w in (windows or WINDOWS):
             add("win", f"{w}", float(w))
         for g in graphs:
             add("graph", g)
@@ -58,6 +64,10 @@ class Vocab:
         for t in toks:
             self.groups.setdefault(t.kind, []).append(t.id)
         self.sep_id = self.groups["sep"][0]
+
+    @classmethod
+    def from_config(cls, cfg) -> "Vocab":
+        return cls(cfg.graphs, cfg.features, cfg.windows or None, cfg.ops or None)
 
     def __len__(self) -> int:
         return len(self.tokens)
