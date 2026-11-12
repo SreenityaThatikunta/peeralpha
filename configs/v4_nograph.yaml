@@ -1,0 +1,20 @@
+# v4 baseline: no graph operators (so no sector prior either)
+name: v4_nograph
+graphs: []
+policy: gat
+freeze_patience: 50
+curriculum: [[0, 7, true], [2000, 10, true]]
+# shared v4 settings: v3 anti-overfit pool (OOF reward, sign gate, 10 members, ridge 1) plus long-horizon
+# features (60/120-day return, 12-1 month momentum, 20-day vol) and windows, no vrel, a smaller op set,
+# formulas capped at 10 tokens, 5-day horizon
+horizon: 5
+features: [ret, ret5, ret20, ret60, ret120, mom12_1, cvwap, range, vol20]
+windows: [1, 5, 10, 20, 40, 60, 120]
+ops: [Abs, Log, CsRank, Add, Sub, Mul, Div, Greater, Less, Ref, Mean, Sum, Std, Max, Min, Delta, WMA, EMA, Cov, Corr, NbrMean, NbrRel, NbrRank]
+max_len: 10
+oof_folds: 4
+stable_folds: 4
+stable_min_frac: 0.75
+pool_capacity: 10
+ridge_lambda: 1.0
+swap_needs_gain: true
