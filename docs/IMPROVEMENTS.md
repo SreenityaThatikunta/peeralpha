@@ -59,6 +59,20 @@ v3_random_graph with t > 1.5, under both snapshot rules.
 Old run configs keep their behaviour: `Config.from_json` fills `gop_zscore`/`graph_residual`
 with the values those runs used, and their saved `weighting`/penalties are explicit.
 
+## v4: long-horizon features and a fixed prior (Nov 2026)
+
+Results for v3 and v4 are in `docs/RESULTS.md`.
+
+| # | Change | Status |
+|---|---|---|
+| 1 | Features `$ret60`, `$ret120`, `$mom12_1` (t-250..t-20), `$vol20`; config `windows` (adds 60, 120) and `ops` (operator subset) | done |
+| 2 | `prior: hand_sector`: the pool starts with fixed members that are never dropped (`pool.PRIORS`) | done |
+| 3 | `configs/v4_*.yaml`: sector graph only, no `$vrel`, no NbrMax/NbrStd/Diffuse, `max_len` 10 | done |
+| 4 | `evaluate.py`: `hand_sector_mom` baseline row, gated seed-union table, hand baseline always on residual sector peers | done |
+| 5 | `scripts/kaggle_walk_forward.py`: one walk-forward window per Kaggle kernel | done |
+| 6 | `hand_sector + mom12_1` as the prior; mix weight between prior and pool picked on validation | todo |
+| 7 | Nifty 200 universe | todo |
+
 ## Sanity check on the relational synthetic market
 
 `python scripts/sanity_check.py --set data_path=data/synthetic_relational_v2.npz gop_zscore=true ...`
