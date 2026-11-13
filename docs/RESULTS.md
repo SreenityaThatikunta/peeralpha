@@ -1,6 +1,7 @@
 # NSE walk-forward results
 
-Universe: ~100 NSE large caps (`data/nse100.npz`), 3 expanding walk-forward windows, 3 seeds,
+Universe: ~100 NSE large caps (`data/nse100.npz`) unless noted; v5 also runs on Nifty 200
+(`data/nifty200.npz`, 145 stocks with full history, 18 NSE industries). 3 expanding walk-forward windows, 3 seeds,
 300k steps per run. Metric: mean daily test IC of the final pool. Full tables (Newey-West t,
 backtests, paired tests, formulas) are in `reports/<tag>_wf/results_table.md`.
 
@@ -25,9 +26,12 @@ Baselines (no learning, no fitting):
 | v2 (`reports/v2nse_wf_rescore`) | 20d | v2_graph_all | 0.038 | 0.033 | - | not set |
 | v3 (`reports/v3nse_wf`) | 5d | v3_random_graph | 0.029 | 0.039 | - | failed |
 | v4 (`reports/v4nse_wf`) | 5d | v4_sector_prior | 0.037 (0.040 seed avg) | 0.039 | **0.044** | passed by 0.0006 (noise) |
+| v5, 100 stocks (`reports/v5nse_wf`) | 5d | hand_sector_mom + pool blend | 0.044 | 0.039 | **0.044** | failed |
+| v5, Nifty 200 (`reports/v5n200_wf`) | 5d | hand_sector_mom + pool blend | **0.050** | 0.038 | 0.047 | passed narrowly (2/3 windows) |
 
-The strongest signal so far is the unlearned `hand_sector_mom` baseline. Learned pools now clearly
-beat the no-graph agent, but not that baseline.
+The unlearned `hand_sector_mom` baseline is still about as strong as anything learned. Learned
+pools clearly beat the no-graph agent. On Nifty 200, blending the learned pool into
+`hand_sector_mom` (weight picked on validation) edges past it, but the margin is within noise.
 
 ## v3 (2026-11-12)
 
@@ -98,11 +102,63 @@ Takeaways:
   `hand_sector_mom` gives 0.059 / 0.038 / 0.041 (mean 0.046 vs 0.044). The weight was picked
   after seeing test, so this is only a lead.
 
+## v5 (2026-11-12)
+
+Changes on top of v4:
+
+- `prior: hand_sector_mom`: the pool starts with `hand_sector` and `$mom12_1` as three fixed
+  members.
+- Prior blend: final signal = z(`hand_sector_mom`) + lam * z(seed-averaged pool), with lam picked
+  on validation from {0, 0.25, 0.5, 1, 2}. This is the protocol version of the v4 lead.
+- New universe: Nifty 200 constituents (`scripts/fetch_nse.py --universe_csv`, built on Kaggle by
+  `scripts/kaggle_fetch_nifty200.py`).
+
+### 100 stocks
+
+Test IC, seed-averaged signal (single-seed mean in brackets):
+
+| Method | w0 | w1 | w2 | Mean |
+|---|---|---|---|---|
+| hand_sector_mom | 0.055 | 0.034 | 0.043 | **0.044** |
+| blend: hand_sector_mom + v5_sector_prior | 0.053 (lam 2) | 0.039 (lam 2) | 0.039 (lam 2) | 0.044 |
+| v5_sector_prior | 0.047 | 0.038 | 0.034 | 0.040 (0.037) |
+| hand_sector | 0.047 | 0.044 | 0.027 | 0.039 |
+| v5_random_prior | 0.045 | 0.036 | 0.034 | 0.038 (0.035) |
+
+Gate (beat `hand_sector_mom` on the mean and in 2 of 3 windows) failed: 0.0437 vs 0.0441.
+Validation picked the largest pool weight in every window, but test did not agree.
+v5_sector_prior vs `hand_sector_mom`, paired per seed and window: -0.007, t -2.8, 2/9 wins.
+
+### Nifty 200 (145 stocks)
+
+| Method | w0 | w1 | w2 | Mean | LS Sharpe |
+|---|---|---|---|---|---|
+| blend: hand_sector_mom + v5_sector_prior | 0.070 (lam 2) | 0.027 (lam 1) | 0.053 (lam 0) | **0.050** | - |
+| blend: hand_sector_mom + v5_random_prior | 0.067 (lam 0.5) | 0.029 (lam 1) | 0.046 (lam 2) | 0.047 | - |
+| hand_sector_mom | 0.063 | 0.025 | 0.053 | 0.047 | 1.19 |
+| v5_sector_prior | 0.068 | 0.025 | 0.042 | 0.045 (0.042) | 1.50 |
+| v5_random_prior | 0.063 | 0.030 | 0.040 | 0.044 (0.041) | 1.40 |
+| v4_sector | 0.063 | 0.027 | 0.032 | 0.041 (0.038) | 1.46 |
+| hand_sector | 0.045 | 0.028 | 0.043 | 0.038 | 0.93 |
+| v4_nograph | 0.058 | 0.007 | 0.029 | 0.031 (0.029) | - |
+
+LS Sharpe is the single-seed mean of the final pool's long-short backtest.
+
+Takeaways:
+
+- The gate passed narrowly: the sector-prior blend beats `hand_sector_mom` in w0 and w1 and ties
+  in w2, where validation set lam to 0. The gain (+0.003) is within noise.
+- The random-graph prior blend ties the baseline, so the real sector graph is not clearly what
+  adds the value.
+- Learned pools have a clearly higher long-short Sharpe than the hand factors (1.50 vs 1.19).
+- Graph operators still beat no-graph by a wide margin (v5_sector_prior vs v4_nograph +0.014,
+  t 5.6, 9/9).
+
 ## Next
 
-1. Use `hand_sector + mom12_1` as both the pool prior and the bar to beat. Pick the mix weight
-   between prior and learned pool on validation.
-2. Move to a Nifty 200 universe (more peers per sector, less noisy daily IC).
+1. More seeds or windows on Nifty 200 to tell whether the blend's edge is real.
+2. Score portfolios on long-short returns as well as IC, since that is where pools beat the hand
+   factors.
 
 ## Reproduce
 
@@ -114,3 +170,6 @@ python scripts/walk_forward.py --data data/nse100.npz --tag v4nse --seeds 0 1 2 
   --methods v4_sector_prior v4_sector v4_nograph v4_random_prior --steps 300000 \
   --baseline v4_nograph --hand --jobs 4 --threads 1
 ```
+
+v5 on Nifty 200: `--data data/nifty200.npz --tag v5n200 --methods v5_sector_prior v4_sector
+v4_nograph v5_random_prior` with the same other flags.
