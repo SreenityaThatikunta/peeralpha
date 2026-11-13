@@ -138,10 +138,6 @@ class Market:
         hi = int(np.searchsorted(self.dates, np.datetime64(end), side="right"))
         return lo, hi
 
-    def split_range(self, split: str) -> Tuple[int, int]:
-        """Raw ``[lo, hi)`` day indices of a split."""
-        return self._ranges[split]
-
     def ic_slice(self, split: str) -> Tuple[int, int]:
         """Day range used to score alphas.
 
@@ -155,11 +151,3 @@ class Market:
 
     def graph(self, name: str) -> NeighborGraph:
         return self._graphs[name]
-
-    @property
-    def feature_names(self) -> List[str]:
-        return list(FEATURES)
-
-    def summary(self) -> str:
-        parts = [f"{k}=[{self.dates[a]}..{self.dates[min(b, self.T) - 1]}]({b - a}d)" for k, (a, b) in self._ranges.items()]
-        return f"Market(T={self.T}, N={self.N}, device={self.device}, " + ", ".join(parts) + ")"

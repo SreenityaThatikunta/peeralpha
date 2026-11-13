@@ -52,9 +52,6 @@ class NeighborGraph:
         vals = x[rows, idx]
         return vals, msk & torch.isfinite(vals)
 
-    def neighbor_counts(self) -> torch.Tensor:
-        return self.mask.sum(-1)
-
 
 # --------------------------------------------------------------------------
 def _standardize(R: torch.Tensor) -> torch.Tensor:
