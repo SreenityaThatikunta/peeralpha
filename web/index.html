@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PeerAlpha · RL that writes stock formulas using a stock's peers</title>
+<meta name="description" content="A reinforcement-learning agent writes interpretable stock-selection formulas, with graph operators that read a stock's sector peers. Build and score formulas on real Nifty 200 data in your browser.">
+<meta property="og:title" content="PeerAlpha · Stock formulas that look at a stock's peers">
+<meta property="og:description" content="MaskablePPO writes alpha formulas with graph operators over sector peers. Formula lab with live walk-forward IC on Nifty 200 data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0c0d0f; --panel: #111215; --panel-2: #15171a; --line: #1f2125; --line-2: #2a2d32;
+  --text: #e7e8ea; --text-2: #a3a7ae; --muted: #6b7079;
+  --accent: #7aa7ff; --ours: #7aa7ff; --base: #c9a26b; --solo: #8b919a; --flat: #5fb8b0;
+  --red: #f0716b; --orange: #f2a65a; --green: #5cc59a; --amber: #e3b341;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.55 Inter, system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: var(--text); text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--text-2); }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+header { position: sticky; top: 0; z-index: 10; background: rgba(12,13,15,.86); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+.bar { max-width: 1240px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 28px; height: 52px; }
+.brand { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.brand b { font-weight: 600; }
+.brand span { color: var(--muted); font-size: 13px; }
+nav { display: flex; gap: 4px; height: 100%; }
+nav a { display: flex; align-items: center; padding: 0 10px; color: var(--text-2); text-decoration: none;
+  border-bottom: 2px solid transparent; font-size: 13.5px; }
+nav a:hover { color: var(--text); }
+nav a.on { color: var(--text); border-bottom-color: var(--text); }
+.bar .gh { margin-left: auto; color: var(--text-2); font-size: 13px; text-decoration: none; white-space: nowrap; }
+.bar .gh:hover { color: var(--text); }
+@media (max-width: 760px) {
+  .bar { gap: 14px; overflow-x: auto; }
+  .brand span, .bar .gh { display: none; }
+}
+
+main { max-width: 1240px; margin: 0 auto; padding: 0 20px 80px; }
+section.tab { display: none; }
+section.tab.on { display: block; }
+
+/* playground */
+.intro { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-top: 28px; flex-wrap: wrap; }
+.intro h1 { font-size: 26px; font-weight: 500; letter-spacing: -.02em; margin: 0; }
+.intro p { color: var(--text-2); margin: 6px 0 0; max-width: 76ch; }
+.play { display: grid; grid-template-columns: 300px minmax(0, 1fr); border: 1px solid var(--line);
+  border-radius: 10px; margin-top: 20px; overflow: hidden; background: var(--panel); }
+@media (max-width: 900px) { .play { grid-template-columns: 1fr; } }
+.side { border-right: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 900px) { .side { border-right: 0; border-top: 1px solid var(--line); order: 2; } }
+.lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px;
+  display: flex; justify-content: space-between; gap: 8px; }
+.lbl span { text-transform: none; letter-spacing: 0; }
+.toks { display: flex; flex-wrap: wrap; gap: 5px; }
+.tok { font-family: var(--mono); font-size: 12px; padding: 3px 7px; border-radius: 5px; background: var(--panel-2);
+  border: 1px solid var(--line-2); color: var(--text); cursor: pointer; }
+.tok:hover:not(:disabled) { border-color: var(--muted); }
+.tok:disabled { opacity: .28; cursor: default; }
+.tok.k-feat { color: #b9cdf7; } .tok.k-graph, .tok.k-gop { color: var(--green); }
+.tok.k-win, .tok.k-const { color: var(--base); }
+select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px;
+  padding: 6px 8px; font: inherit; font-size: 13px; }
+button { font: inherit; font-size: 13px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 500; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; }
+.row button { flex: 1; }
+.hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.loader { height: 2px; background: var(--line-2); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+.loader i { display: block; height: 100%; width: 30%; background: var(--text-2); animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+.stage { min-width: 0; display: flex; flex-direction: column; }
+.formula { padding: 16px 16px 12px; border-bottom: 1px solid var(--line); }
+.formula .f { font-family: var(--mono); font-size: 17px; line-height: 1.45; word-break: break-word; min-height: 25px; }
+.formula .f .ph { color: var(--muted); font-family: Inter, system-ui, sans-serif; font-size: 14px; }
+.post { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; align-items: center; }
+.post .chip { font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--text-2); }
+.post .n { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.stackline { margin-top: 8px; font-size: 12.5px; color: var(--text-2); }
+.stackline b { color: var(--text); font-weight: 500; }
+.scores { display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); border-bottom: 1px solid var(--line); }
+@media (max-width: 600px) { .scores { grid-template-columns: 1fr 1fr; } }
+.scores > div { padding: 12px 16px; border-right: 1px solid var(--line); }
+.scores > div:last-child { border-right: 0; }
+.scores .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.scores .v { font-size: 22px; font-weight: 500; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.scores .big .v { font-size: 30px; }
+.scores .s { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+.pos, .neg { color: var(--text); }
+.chartbox { padding: 10px 16px 6px; }
+.chartbox svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chartbox svg text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.chead { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.chead h4 { margin: 0; font-size: 13px; font-weight: 500; }
+.chead .cap { color: var(--muted); font-size: 12px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
+.legend i { display: inline-block; width: 14px; height: 2px; margin-right: 6px; vertical-align: 3px; }
+.narr { padding: 10px 16px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 13px; }
+.narr b { color: var(--text); font-weight: 500; }
+.stage-foot { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); flex-wrap: wrap; align-items: center; }
+.stage-foot .hint { margin-left: auto; }
+
+.below { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 20px; }
+@media (max-width: 900px) { .below { grid-template-columns: 1fr; } }
+.card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.card h3 { margin: 0; padding: 12px 14px; font-size: 13px; font-weight: 500; border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; gap: 10px; }
+.card h3 span { color: var(--muted); font-weight: 400; }
+.card .body { padding: 12px 14px; color: var(--text-2); font-size: 13px; }
+.card .body p { margin: 0 0 8px; }
+.card .body b { color: var(--text); font-weight: 500; }
+.peers { display: grid; grid-template-columns: 1fr; }
+.peer { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.peer:last-child { border-bottom: 0; }
+.peer .i { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.peer .c { font-family: var(--mono); font-size: 12.5px; }
+.peer .s { color: var(--muted); font-size: 12px; text-align: right; }
+
+/* prose tabs */
+.prose { max-width: 760px; padding-top: 44px; }
+.prose h2 { font-size: 28px; font-weight: 500; letter-spacing: -.02em; margin: 0 0 12px; }
+.prose h3 { font-size: 16px; font-weight: 500; margin: 40px 0 10px; }
+.prose p, .prose li { color: var(--text-2); }
+.prose p b, .prose li b { color: var(--text); font-weight: 500; }
+.prose ul { padding-left: 18px; }
+.prose li { margin: 5px 0; }
+.lede { font-size: 16px; color: var(--text-2); }
+.wide { max-width: 1240px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
+.grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 20px 0; }
+@media (max-width: 760px) { .grid3, .grid2 { grid-template-columns: 1fr; } }
+.box { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--panel); }
+.box .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.box .v { font-size: 26px; font-weight: 500; letter-spacing: -.02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.box p { margin: 4px 0 0; font-size: 13px; color: var(--text-2); }
+.box h4 { margin: 0 0 4px; font-size: 14px; font-weight: 500; }
+.flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 18px 0; align-items: stretch; }
+@media (max-width: 860px) { .flow { grid-template-columns: 1fr; } }
+.flow .box { padding: 12px; }
+.flow .box p { font-size: 12.5px; }
+.flow .box.hl { border-color: var(--accent); background: rgba(122,167,255,.06); }
+.flow .no { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+table.t { width: 100%; border-collapse: collapse; font-size: 13px; margin: 14px 0; }
+table.t th, table.t td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.t th:first-child, table.t td:first-child { text-align: left; white-space: normal; color: var(--text-2); }
+table.t th { font-weight: 500; font-size: 12px; color: var(--muted); }
+table.t td { font-family: var(--mono); font-size: 12.5px; }
+table.t td:first-child { font-family: inherit; font-size: 13px; }
+table.t tr.hl td:first-child { color: var(--text); }
+table.t td.best { color: var(--green); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 14px 0; }
+.tablewrap table.t { margin: 0; }
+.tablewrap table.t tr:last-child td { border-bottom: 0; }
+table.mdp td { font-family: inherit; white-space: normal; text-align: left; color: var(--text-2); font-size: 13px; }
+table.mdp td:first-child { color: var(--text); width: 110px; }
+.chart { border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 8px; background: var(--panel); margin: 18px 0; }
+.chart h4 { margin: 0; font-size: 13.5px; font-weight: 500; }
+.chart .cap { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart svg text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; color: var(--text-2); }
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+footer .bar { height: auto; padding: 22px 20px; justify-content: space-between; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><b>PeerAlpha</b><span>Stock formulas that look at a stock's peers</span></div>
+    <nav>
+      <a href="#playground" data-tab="playground">Playground</a>
+      <a href="#problem" data-tab="problem">Problem</a>
+      <a href="#approach" data-tab="approach">Approach</a>
+      <a href="#results" data-tab="results">Results</a>
+    </nav>
+    <a class="gh" href="https://github.com/SreenityaThatikunta/peeralpha">GitHub ↗</a>
+  </div>
+</header>
+
+<main>
+<!-- ================= PLAYGROUND ================= -->
+<section class="tab" id="tab-playground">
+  <div class="intro">
+    <div>
+      <h1>Write an alpha the way the agent does.</h1>
+      <p>The agent builds a formula one token at a time. Tokens that would make the formula invalid are masked out,
+        so every formula it can finish is valid. Pick tokens below, or load one the agent found. The finished formula is scored
+        on real Nifty 200 data (145 stocks), on the same three walk-forward test periods as the Results page.</p>
+    </div>
+  </div>
+
+  <div class="play">
+    <aside class="side">
+      <div>
+        <div class="lbl">Load a formula</div>
+        <select id="preset"></select>
+      </div>
+      <div id="palette"></div>
+      <div>
+        <div class="row">
+          <button id="undo">Undo</button>
+          <button id="clear">Clear</button>
+          <button id="random" title="Random valid tokens until the formula is finished">Random</button>
+        </div>
+        <div class="hint" style="margin-top:8px">Random picks uniformly among the unmasked tokens. That is exactly the
+          random-search baseline the agent is compared against.</div>
+      </div>
+    </aside>
+
+    <div class="stage">
+      <div class="formula">
+        <div class="f" id="infix"></div>
+        <div class="post" id="post"></div>
+        <div class="stackline" id="stackline"></div>
+      </div>
+      <div class="scores" id="scores"></div>
+      <div class="chartbox">
+        <div class="chead">
+          <div><h4>Daily IC, 120-day rolling mean</h4><div class="cap">correlation across stocks between the formula and the next 5-day return</div></div>
+          <div class="legend" id="legend"></div>
+        </div>
+        <svg id="icchart" viewBox="0 0 900 240" aria-label="Rolling IC chart"></svg>
+      </div>
+      <div class="narr" id="narr"></div>
+      <div class="stage-foot">
+        <button id="pin" disabled>Pin as comparison</button>
+        <button id="unpin" disabled>Remove pin</button>
+        <span class="hint" id="status">Loading Nifty 200 data (4 MB)…</span>
+      </div>
+      <div class="loader" id="loader" style="margin:0"><i></i></div>
+    </div>
+  </div>
+
+  <div class="below">
+    <div class="card">
+      <h3>A stock's peers <span>the sector graph the graph operators read</span></h3>
+      <div class="body" style="padding-bottom:4px">
+        <select id="stock"></select>
+        <p style="margin-top:10px">Up to 8 same-industry stocks whose returns, net of the sector average, moved most like this one over 2012–2015.
+          The graph is fixed before any test year, so it cannot see the future.</p>
+      </div>
+      <div class="peers" id="peers"></div>
+    </div>
+    <div class="card">
+      <h3>Reading the numbers <span>one formula is not the model</span></h3>
+      <div class="body">
+        <p><b>IC</b> is the daily cross-sectional correlation between a formula's values and each stock's next 5-day return, averaged over days.
+          On liquid large caps, a single formula with a steady IC of 0.02–0.04 is good.</p>
+        <p><b>Sign does not matter much.</b> A formula with a steady negative IC is just as useful: the pool's ridge weights flip it.
+          Within-sector reversal is the classic example.</p>
+        <p><b>The model is a pool.</b> PeerAlpha keeps about 10 formulas and combines them with ridge regression. The headline numbers on the
+          Results page are for those pools, averaged over 3 seeds, so they are higher than most single formulas here.</p>
+        <p><b>t</b> is a Newey-West t-statistic, which allows for the overlap between neighbouring days' 5-day returns.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PROBLEM ================= -->
+<section class="tab" id="tab-problem">
+  <div class="prose">
+    <h2>The problem</h2>
+    <p class="lede">Quant funds rank stocks with <b>alpha factors</b>: formulas over price and volume that predict which stocks will do
+      better than others over the next few days. Finding good ones by hand is slow, so recent work searches for them automatically.</p>
+    <p>One line of work, starting with <b>AlphaGen</b>, trains a reinforcement-learning agent to write formulas token by token, like
+      <code>Corr($close, $volume, 20)</code>, and rewards it when a new formula improves a combined pool of formulas.
+      The result is a short list of formulas a person can read and check, rather than a black-box model.</p>
+    <h3>What those formulas cannot see</h3>
+    <p>In AlphaGen and its successors, every operator works on <b>one stock's own history</b>, plus cross-sectional ranks over the whole market.
+      But a lot of what moves a stock comes from the stocks around it:</p>
+    <div class="grid3">
+      <div class="box"><h4><span style="color:var(--green)">●</span> Sector momentum</h4><p>When a stock's industry has been rising, the stock tends to keep rising with it.</p></div>
+      <div class="box"><h4><span style="color:var(--green)">●</span> Peer reversal</h4><p>A stock that jumped far ahead of its peers this week often gives some of it back.</p></div>
+      <div class="box"><h4><span style="color:var(--green)">●</span> Lead-lag</h4><p>Some stocks react a day after others, so yesterday's move in a leader says something about a follower today.</p></div>
+    </div>
+    <p>A formula that only looks at one stock at a time cannot express "my return minus my sector's average return".</p>
+    <h3>What PeerAlpha asks</h3>
+    <ul>
+      <li><b>Can the agent use peers?</b> Add graph operators to the formula language that read a stock's neighbours on a relationship graph.</li>
+      <li><b>Does it help out of sample?</b> Compare against the same agent without graph operators, random search, and hand-built peer factors.</li>
+      <li><b>Is the result real?</b> Walk-forward tests over 2018–2024, several seeds, paired tests and Newey-West t-statistics, with every choice made on validation data.</li>
+    </ul>
+    <h3>The data</h3>
+    <p>Daily prices for Indian large caps from Yahoo Finance, 2011–2024: the <b>Nifty 200</b> constituents with full history (145 stocks, 18 NSE industries)
+      and an earlier universe of about <b>100 NSE stocks</b>. The playground on this site runs on the Nifty 200 set.</p>
+    <p><a href="#playground">Try writing a formula →</a></p>
+  </div>
+</section>
+
+<!-- ================= APPROACH ================= -->
+<section class="tab" id="tab-approach">
+  <div class="prose">
+    <h2>How it works</h2>
+    <p class="lede">A MaskablePPO agent writes formulas in postfix, one token per step. Finished formulas join a pool, and the agent is
+      paid for how much each one improves the pool out of sample.</p>
+  </div>
+  <div class="prose wide" style="padding-top:0; max-width:1000px">
+    <div class="flow">
+      <div class="box"><div class="no">1 · data</div><h4>Daily prices</h4><p>Returns, 12-1 momentum, volatility, close vs VWAP, day range.</p></div>
+      <div class="box"><div class="no">2 · graphs</div><h4>Peer graphs</h4><p>Sector, correlation and lead-lag neighbours, built only from past data.</p></div>
+      <div class="box hl"><div class="no">3 · agent</div><h4>MaskablePPO</h4><p>A graph-attention policy over the partial formula tree picks the next token.</p></div>
+      <div class="box"><div class="no">4 · pool</div><h4>Alpha pool</h4><p>About 10 formulas, ridge-combined. Reward: the out-of-fold IC gain.</p></div>
+      <div class="box"><div class="no">5 · test</div><h4>Walk-forward</h4><p>Three test periods, 3 seeds, paired tests against controls.</p></div>
+    </div>
+  </div>
+  <div class="prose" style="padding-top:8px">
+    <h3 style="margin-top:20px">The decision problem</h3>
+    <div class="tablewrap"><table class="t mdp">
+      <tr><td>State</td><td>The partial formula: its tokens, the operator-to-operand edges of its tree, the open subtrees on the stack, and the pool's state (budget left, fill, current IC).</td></tr>
+      <tr><td>Action</td><td>The next token: a feature, constant, window, graph, operator, or end-of-formula. A postfix grammar builds an <b>action mask</b> so only tokens that keep the formula valid and finishable within 10 tokens can be picked.</td></tr>
+      <tr><td>Reward</td><td>Zero until the formula ends. Then the gain in the pool's out-of-fold IC when the formula joins, plus a small diversity bonus. Invalid, duplicate or sign-unstable formulas are penalised.</td></tr>
+      <tr><td>Policy</td><td>A graph-attention encoder over the formula tree (an LSTM baseline is included), trained with MaskablePPO from <code>sb3-contrib</code>.</td></tr>
+    </table></div>
+
+    <h3>Graph operators</h3>
+    <p>Each takes a series and a graph, and for every stock and day it looks at that stock's neighbours on that day. Values are z-scored across
+      stocks first, so peers are compared on one scale.</p>
+    <div class="tablewrap"><table class="t mdp">
+      <tr><td><code>NbrMean</code></td><td>Mean over the neighbours. <code>NbrMean($ret20, G_sector)</code> is sector momentum.</td></tr>
+      <tr><td><code>NbrRel</code></td><td>Own value minus the neighbour mean. <code>NbrRel($ret5, G_sector)</code> is how far a stock ran ahead of its peers this week.</td></tr>
+      <tr><td><code>NbrRank</code></td><td>Share of neighbours whose value is below the stock's own.</td></tr>
+      <tr><td><code>NbrStd</code>, <code>NbrMax</code>, <code>Diffuse</code></td><td>Spread, maximum, and a two-hop mean. In the code, but left out of the final vocabulary.</td></tr>
+    </table></div>
+    <p>All graphs are causal: the graph used on day <i>t</i> is built from data up to day <i>t−1</i>. The sector graph links same-industry stocks,
+      ranked by how closely their sector-adjusted returns move together in the training years.</p>
+
+    <h3>Keeping the pool honest</h3>
+    <p>The first versions overfit badly: training IC of 0.12–0.18 against test IC near 0.02. The fixes that mattered:</p>
+    <ul>
+      <li><b>Out-of-fold reward.</b> A formula's gain is measured on folds of the training data it was not fitted on.</li>
+      <li><b>Sign gate.</b> Formulas whose IC flips sign across training folds are rejected.</li>
+      <li><b>A small pool</b> of 10 members with ridge regularisation, and a swap only when it raises the pool's score.</li>
+      <li><b>A hand-built prior.</b> The pool starts with sector momentum, within-sector reversal and 12-1 month momentum as fixed members, so the agent is paid only for what it adds on top of them.</li>
+    </ul>
+
+    <h3>Evaluation protocol</h3>
+    <p>Expanding windows: train from 2012, validate on the two years before each test period, then test on 2018–19, 2020–21 and 2022 to mid-2024.
+      Every learned method runs 3 seeds per window. Comparisons are paired by seed and window. Blend weights are picked on validation, never on test.</p>
+
+    <h3>Stack</h3>
+    <p>Python, PyTorch, Stable-Baselines3 and <code>sb3-contrib</code> for MaskablePPO, NumPy and pandas. Training runs on Kaggle CPU kernels,
+      one per walk-forward window. This page's formula lab is a JavaScript port of the formula grammar, operators and IC code; it matches the Python
+      package's IC to within 1e-5 on the formulas we checked (apart from tie order inside <code>CsRank</code>).</p>
+  </div>
+</section>
+
+<!-- ================= RESULTS ================= -->
+<section class="tab" id="tab-results">
+  <div class="prose wide">
+    <h2>Results</h2>
+    <p class="lede" style="max-width:780px">Test IC averaged over three walk-forward test periods (2018–19, 2020–21, 2022 to mid-2024), 5-day horizon.
+      Learned methods use the 3 seeds' averaged signal. Long-short Sharpe is a top-minus-bottom 20% backtest.</p>
+    <div class="grid3">
+      <div class="box"><div class="k">graph operators vs none</div><div class="v">+0.014 IC</div>
+        <p>The same agent with graph operators beats it without them in 9 of 9 seed-window pairs (paired t 5.6, Nifty 200).</p></div>
+      <div class="box"><div class="k">vs the hand-built factor</div><div class="v">0.050 vs 0.047</div>
+        <p>Hand factor plus the learned pool, against the hand factor alone. The gap is <b>within noise</b>, and on 100 stocks it is a tie.</p></div>
+      <div class="box"><div class="k">long-short Sharpe</div><div class="v">1.50 vs 1.19</div>
+        <p>Learned pools rank stocks into better long-short portfolios than the hand factor does.</p></div>
+    </div>
+    <div class="chart">
+      <h4>Test IC by period, Nifty 200 (145 stocks)</h4>
+      <div class="cap">Each bar is one method in one test period. Blend = hand factor plus learned pool, pool weight picked on validation.</div>
+      <div class="legend" id="rkeys" style="margin:8px 0 4px"></div>
+      <svg id="rchart" viewBox="0 0 900 260" aria-label="Test IC by period"></svg>
+    </div>
+  </div>
+  <div class="prose" style="padding-top:0; max-width:900px">
+    <h3>Nifty 200 (145 stocks)</h3>
+    <div class="tablewrap"><table class="t" id="t200"></table></div>
+    <h3>NSE 100 (about 100 large caps)</h3>
+    <div class="tablewrap"><table class="t" id="t100"></table></div>
+    <p class="hint">On 100 stocks the blend's validation step picked the largest pool weight in every period, and test did not agree: 0.0437 against 0.0441.</p>
+  </div>
+  <div class="prose">
+    <h3>Reading the results honestly</h3>
+    <ul>
+      <li><b>Peer information is real signal.</b> Graph operators beat the no-graph agent in every seed and period, on both universes.</li>
+      <li><b>The hand-built factor is very hard to beat.</b> Sector momentum, within-sector reversal and 12-1 momentum together reach 0.047. Learned pools get close, and blending adds about 0.003 on Nifty 200, which is not significant. On 100 stocks the blend ties.</li>
+      <li><b>PPO and random search score about the same</b> with the same vocabulary and prior (0.045 vs 0.044). The formula language and the pool design matter more than the search method.</li>
+      <li><b>Where learned pools do win</b> is long-short portfolios: Sharpe about 1.5 against 1.2.</li>
+      <li><b>Next:</b> more seeds and periods on Nifty 200 to tell whether the blend's edge is real, and scoring pools on long-short returns as well as IC.</li>
+    </ul>
+    <h3>Run it yourself</h3>
+<pre>git clone https://github.com/SreenityaThatikunta/peeralpha.git && cd peeralpha
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/fetch_nse.py --universe_csv ind_nifty200list.csv --out data/nifty200.npz
+python scripts/walk_forward.py --data data/nifty200.npz --tag v5n200 --seeds 0 1 2 --valid_years 2 \
+  --methods v5_sector_prior v4_sector v4_nograph v5_random_prior --steps 300000 \
+  --baseline v4_nograph --hand --jobs 4 --threads 1</pre>
+    <p>The full history, v2 to v5 with every paired test, is in <a href="https://github.com/SreenityaThatikunta/peeralpha/blob/main/docs/RESULTS.md">docs/RESULTS.md</a>.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="bar">
+    <span>PeerAlpha · Sreenitya Thatikunta</span>
+    <span><a href="https://github.com/SreenityaThatikunta/peeralpha">Source on GitHub</a></span>
+  </div>
+</footer>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
