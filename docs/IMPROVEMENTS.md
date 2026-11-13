@@ -1,8 +1,10 @@
-# Improvement plan (Oct 2026)
+# Design log
 
-Full write-up with evidence: https://claude.ai/artifact/SfsR2CkixGpFecwADZvQTi
+What was changed in each version and why. Results are in `docs/RESULTS.md`.
 
-## Diagnosis
+## v2: fixing the collapse (Oct 2026)
+
+### Diagnosis
 
 Almost every PPO run in `runs/` collapsed within 20k-50k steps to one-token formulas
 (`$close <SEP>`): 2.00 steps/episode, mean return exactly `-gamma_len/15 = -0.0033`, pool
@@ -10,7 +12,7 @@ frozen for the rest of the run, graph usage 0%. Only `gamma_len: 0` configs (alp
 alphagen_dense) and random search kept exploring, which is why they looked better. The
 existing graph vs no-graph tables therefore say nothing about graph operators yet.
 
-## Status
+### Status
 
 | # | Change | Status |
 |---|---|---|
@@ -28,7 +30,7 @@ existing graph vs no-graph tables therefore say nothing about graph operators ye
 
 ## v3: generalization (Nov 2026)
 
-Analysis of the v2 NSE walk-forward: https://claude.ai/artifact/MPLp5q2KuRipi8RHog4vaR.
+What the v2 NSE walk-forward showed:
 Members barely keep their sign out of sample, ridge over 20 of them inflates train IC to 0.12-0.16,
 80-94% of members use raw price levels, and validation IC does not predict test IC.
 
@@ -70,8 +72,23 @@ Results for v3 and v4 are in `docs/RESULTS.md`.
 | 3 | `configs/v4_*.yaml`: sector graph only, no `$vrel`, no NbrMax/NbrStd/Diffuse, `max_len` 10 | done |
 | 4 | `evaluate.py`: `hand_sector_mom` baseline row, gated seed-union table, hand baseline always on residual sector peers | done |
 | 5 | `scripts/kaggle_walk_forward.py`: one walk-forward window per Kaggle kernel | done |
-| 6 | `hand_sector + mom12_1` as the prior; mix weight between prior and pool picked on validation | todo |
-| 7 | Nifty 200 universe | todo |
+| 6 | `hand_sector + mom12_1` as the prior; mix weight between prior and pool picked on validation | done in v5 |
+| 7 | Nifty 200 universe | done in v5 |
+
+## v5: stronger prior and a bigger universe (Nov 2026)
+
+| # | Change | Status |
+|---|---|---|
+| 1 | `prior: hand_sector_mom`: `hand_sector` plus `$mom12_1` as fixed pool members | done |
+| 2 | `evaluate.py` prior-blend table: z(prior) + lam * z(seed-averaged pool), lam picked on validation | done |
+| 3 | `configs/v5_sector_prior.yaml`, `configs/v5_random_prior.yaml` | done |
+| 4 | `scripts/fetch_nse.py --universe_csv` (universe and industries from an index CSV); `scripts/kaggle_fetch_nifty200.py` | done |
+| 5 | Nifty 200 walk-forward (`reports/v5n200_wf`) | done |
+| 6 | Point-in-time universe (survivorship) | todo |
+| 7 | More seeds / windows on Nifty 200 to test whether the blend's edge is real | todo |
+
+Outcome: on 100 stocks the blend ties `hand_sector_mom` (0.044); on Nifty 200 it reaches 0.050 vs
+0.047, a narrow pass that is within noise.
 
 ## Sanity check on the relational synthetic market
 
