@@ -1,5 +1,9 @@
 # PeerAlpha
 
+[![tests](https://github.com/SreenityaThatikunta/peeralpha/actions/workflows/tests.yml/badge.svg)](https://github.com/SreenityaThatikunta/peeralpha/actions/workflows/tests.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **Reinforcement learning that writes stock-selection formulas and can look at a stock's peers.**
 
 PeerAlpha trains a MaskablePPO agent to write interpretable alpha formulas one token at a time,
@@ -8,6 +12,8 @@ see each stock's own price history. PeerAlpha's formula language adds **graph op
 a stock's neighbours on a day-varying relationship graph (sector peers, return-correlation peers,
 lead-lag leaders). The agent is rewarded for how much each new formula improves a combined pool of
 alphas, scored out of fold to limit overfitting.
+
+![Test IC on Nifty 200: learned methods vs hand-built baselines](docs/figures/results_nifty200.png)
 
 ## Highlights
 
@@ -79,6 +85,7 @@ The full history (v2 to v5, both universes, with paired tests) is in
 ## Quick start
 
 ```bash
+git clone https://github.com/SreenityaThatikunta/peeralpha.git && cd peeralpha
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q                                           # offline, synthetic data
@@ -132,8 +139,9 @@ peeralpha/
 configs/        one YAML per experiment; v2_* to v5_* are the current NSE setups
 scripts/        data fetchers, walk_forward.py, Kaggle kernel scripts, sanity_check.py
 tests/          grammar completeness, operator causality, graph no-lookahead, pool and env tests
-reports/        evaluated results per experiment (tables, formulas, figures)
-docs/           RESULTS.md (results history), IMPROVEMENTS.md (design log)
+reports/        evaluated results per experiment (tables, formulas, figures); early pilots in reports/archive/
+docs/           RESULTS.md (results history), IMPROVEMENTS.md (design log), figures/
+.github/        CI: pytest on every push and pull request
 train.py  evaluate.py  run_suite.py
 ```
 
@@ -154,7 +162,11 @@ train.py  evaluate.py  run_suite.py
 ## Tech stack
 
 Python, PyTorch, Gymnasium, Stable-Baselines3 / sb3-contrib (MaskablePPO), NumPy, pandas,
-Matplotlib, yfinance, pytest. Experiments run on Kaggle CPU kernels.
+Matplotlib, yfinance, pytest, GitHub Actions. Experiments run on Kaggle CPU kernels.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).
 
 ## Acknowledgements
 
