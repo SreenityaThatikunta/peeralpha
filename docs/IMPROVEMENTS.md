@@ -26,7 +26,7 @@ existing graph vs no-graph tables therefore say nothing about graph operators ye
 | 6 | Evaluation: 10 seeds, H=5 on NSE | run-time choice (`--seeds`, `--set horizon=5`) |
 | 7 | Backtest: long-short top/bottom 20% (`LS Sharpe`, `LS AnnRet` columns) | done |
 | 7 | Point-in-time universe (survivorship) | todo |
-| 8 | Cache formula evaluations; regenerate `reports/SUMMARY.md` | todo |
+| 8 | Cache formula evaluations | todo |
 
 ## v3: generalization (Nov 2026)
 
