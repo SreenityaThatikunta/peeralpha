@@ -12,6 +12,9 @@ logs/
 # old local git history (not part of this repo)
 .git-old-prajna/
 
+# secrets
+.env
+
 # python
 __pycache__/
 *.pyc
