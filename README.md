@@ -3,6 +3,9 @@
 [![tests](https://github.com/SreenityaThatikunta/peeralpha/actions/workflows/tests.yml/badge.svg)](https://github.com/SreenityaThatikunta/peeralpha/actions/workflows/tests.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![website](https://img.shields.io/badge/website-peeralpha.sreenitya.in-7aa7ff)](https://peeralpha.sreenitya.in)
+
+**Live demo: [peeralpha.sreenitya.in](https://peeralpha.sreenitya.in)**. Write formulas with the agent's own action mask and score them on real Nifty 200 data in your browser.
 
 **Reinforcement learning that writes stock-selection formulas and can look at a stock's peers.**
 
@@ -142,6 +145,7 @@ tests/          grammar completeness, operator causality, graph no-lookahead, po
 reports/        evaluated results per experiment (tables, formulas, figures); early pilots in reports/archive/
 docs/           RESULTS.md (results history), IMPROVEMENTS.md (design log), figures/
 .github/        CI: pytest on every push and pull request
+web/            the project website (static, deployed on Vercel, data built by web/build.py)
 train.py  evaluate.py  run_suite.py
 ```
 

@@ -1,5 +1,7 @@
 # NSE walk-forward results
 
+The results can also be browsed at https://peeralpha.sreenitya.in (Results tab).
+
 Universe: ~100 NSE large caps (`data/nse100.npz`) unless noted; v5 also runs on Nifty 200
 (`data/nifty200.npz`, 145 stocks with full history, 18 NSE industries). 3 expanding walk-forward windows, 3 seeds,
 300k steps per run. Metric: mean daily test IC of the final pool. Full tables (Newey-West t,
@@ -148,8 +150,8 @@ Takeaways:
 
 - The gate passed narrowly: the sector-prior blend beats `hand_sector_mom` in w0 and w1 and ties
   in w2, where validation set lam to 0. The gain (+0.003) is within noise.
-- The random-graph prior blend ties the baseline, so the real sector graph is not clearly what
-  adds the value.
+- The random-search prior blend also ties the baseline, so PPO is not clearly what adds the value
+  over random search with the same vocabulary.
 - Learned pools have a clearly higher long-short Sharpe than the hand factors (1.50 vs 1.19).
 - Graph operators still beat no-graph by a wide margin (v5_sector_prior vs v4_nograph +0.014,
   t 5.6, 9/9).

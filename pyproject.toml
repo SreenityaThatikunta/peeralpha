@@ -22,6 +22,10 @@ dependencies = [
     "yfinance>=0.2",
 ]
 
+[project.urls]
+Homepage = "https://peeralpha.sreenitya.in"
+Repository = "https://github.com/SreenityaThatikunta/peeralpha"
+
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
 
