@@ -181,7 +181,7 @@ def assemble(frames: Dict[str, pd.DataFrame], ind_map: Dict[str, str], out: str)
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     np.savez_compressed(
-        out, dates=idx.strftime("%Y-%m-%d").values.astype("U10"),
+        out, dates=np.asarray(idx.strftime("%Y-%m-%d"), dtype="U10"),
         codes=np.array(codes), sector_ids=sector_ids, sector_names=np.array(names), **arrays,
     )
     print(f"[data] saved {out}: T={len(idx)} N={len(codes)} sectors={len(names)}", flush=True)

@@ -81,7 +81,7 @@ def make_synthetic(
             arr[:k, i] = np.nan
 
     out = dict(
-        dates=dates.strftime("%Y-%m-%d").values.astype("U10"),
+        dates=np.asarray(dates.strftime("%Y-%m-%d"), dtype="U10"),
         codes=np.array([f"SYN{i:03d}" for i in range(N)]),
         sector_ids=sector.astype(np.int64),
         sector_names=np.array([f"S{s}" for s in range(n_sectors)]),
